@@ -1,3 +1,7 @@
+[![Rust Build](https://github.com/cloudymoma/dataproc-tpcds/actions/workflows/rust.yml/badge.svg)](https://github.com/cloudymoma/dataproc-tpcds/actions/workflows/rust.yml)
+
+English | [简体中文](README_cn.md)
+
 # GCP Dataproc TPC-DS Auto-Benchmark Tool
 
 A lightweight, highly automated command-line tool for running TPC-DS (1TB scale) performance benchmarks on Google Cloud Dataproc with a single configuration file.
@@ -23,6 +27,14 @@ This guide walks you through the complete benchmark process from setup to cleanu
    - Dataproc API
    - Cloud Storage API
    - BigQuery API
+
+   Enable all required APIs with:
+   ```bash
+   gcloud services enable compute.googleapis.com \
+       dataproc.googleapis.com \
+       storage.googleapis.com \
+       bigquery.googleapis.com
+   ```
 
 ### Step 1: Installation
 

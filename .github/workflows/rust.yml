@@ -1,0 +1,53 @@
+name: Rust Build and Test
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - 'datagen/**'
+      - '.github/workflows/rust.yml'
+  pull_request:
+    branches: [main, master]
+    paths:
+      - 'datagen/**'
+      - '.github/workflows/rust.yml'
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-action@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            datagen/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('datagen/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Build (debug)
+        working-directory: datagen
+        run: cargo build
+
+      - name: Run tests (debug)
+        working-directory: datagen
+        run: cargo test
+
+      - name: Build (release)
+        working-directory: datagen
+        run: cargo build --release
+
+      - name: Run tests (release)
+        working-directory: datagen
+        run: cargo test --release
