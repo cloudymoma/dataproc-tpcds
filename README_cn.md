@@ -21,7 +21,7 @@
 
 1. **Google Cloud SDK** 已安装并配置（`gcloud` CLI）
 2. **Python 3.8+** 及 pip
-3. **Rust 1.70+**（用于高性能数据生成器）- 通过 [rustup](https://rustup.rs/) 安装
+3. **Rust 1.70+**（可选，仅 Rust 数据生成引擎需要）- 通过 [rustup](https://rustup.rs/) 安装
 4. **GCP 项目** 需启用以下 API：
    - Compute Engine API
    - Dataproc API
@@ -45,9 +45,6 @@ cd dataproc-tpcds
 
 # 安装 Python 依赖
 pip install -r requirements.txt
-
-# 构建 Rust 数据生成器（可选但推荐，以获得更好的性能）
-make datagen-build
 
 # 使用 Google Cloud 进行身份验证
 gcloud auth application-default login
@@ -73,11 +70,19 @@ benchmark:
   data_path: "gs://your-bucket/tpcds-data/1T"
   data_format: "parquet"
 
-# 可选：调整 Rust 数据生成器
+# 数据生成引擎选择
 datagen:
-  generator_threads: 8
-  uploader_threads: 4
-  file_size_mb: 128
+  engine: "spark"  # "spark"（默认）或 "rust"
+
+  # Spark 引擎设置（在 Dataproc 集群上分布式运行）
+  spark:
+    parallelism: 32
+
+  # Rust 引擎设置（本地高性能，需要 Rust 工具链）
+  rust:
+    generator_threads: 8
+    uploader_threads: 4
+    file_size_mb: 128
 ```
 
 ### 步骤 3：验证配置
@@ -89,20 +94,30 @@ make dry-run
 
 ### 步骤 4：生成 TPC-DS 数据
 
-选择一个选项：
+> **重要：** 数据生成和基准测试是**独立的操作**。必须在运行基准测试之前生成数据。每个规模因子只需生成**一次**数据 - 您可以对同一数据集运行多次基准测试。
+
+数据生成使用 `conf.yaml` 中指定的引擎（`datagen.engine`）：
 
 ```bash
-# 选项 A：使用高性能 Rust 生成器（推荐）
-make datagen-run
+# 首先创建集群（Spark 引擎需要）
+make cluster-create
 
-# 选项 B：使用基于 Spark 的生成器（较慢但无需 Rust）
+# 使用配置的引擎（spark 或 rust）生成数据
 make data-gen
 
 # 验证数据是否已生成
 make data-check
 ```
 
+**引擎选择：**
+- **`spark`**（默认）：在 Dataproc 集群上分布式生成。无需 Rust 依赖。对于大规模因子（100GB+），由于分布式 I/O 提供显著加速。**需要集群正在运行。**
+- **`rust`**：本地高性能生成器，并行上传到 GCS。需要 Rust 工具链。可以在没有集群的情况下生成数据。
+
+**数据复用：** 生成后，同一数据集可用于多次基准测试运行。在 conf.yaml 中设置 `skip_data_gen: true` 以在后续运行中跳过数据生成，或者直接不再运行 `make data-gen`。
+
 ### 步骤 5：运行基准测试
+
+> **前提条件：** 确保在运行基准测试之前已生成数据（步骤 4）。
 
 ```bash
 # 交互模式（结束时提示清理集群）
@@ -214,17 +229,14 @@ make cluster-status    # 检查集群状态
 make cluster-info      # 显示集群配置
 
 # 数据操作
-make data-gen          # 仅生成 TPC-DS 数据
+make data-gen          # 生成 TPC-DS 数据（使用配置中的引擎）
 make data-check        # 检查数据是否存在
 make data-tables       # 列出可用表
 
-# Rust 数据生成器（高性能）
+# Rust 数据生成器（开发用）
 make datagen-build     # 构建 Rust 数据生成器（release）
 make datagen-test      # 运行 Rust datagen 测试
-make datagen-run       # 生成数据并上传到 GCS
-make datagen-dry-run   # 试运行（仅本地，不上传）
-make datagen-verbose   # 详细日志生成
-make datagen-clean     # 清理构建产物
+make datagen-clean     # 清理 Rust 构建产物
 
 # BigQuery
 make bq-setup          # 创建 BQ 数据集/表
@@ -237,14 +249,38 @@ make list-queries      # 列出可用 SQL 查询
 make show-query QUERY=q1  # 显示指定查询
 ```
 
-## 高性能 Rust 数据生成器
+## 数据生成引擎
 
-对于极致性能的数据生成，请使用基于 Rust 的生成器。它使用双线程池架构：
+本工具支持两种数据生成引擎。根据您的需求选择：
 
+### Spark 引擎（默认）
+
+在 Dataproc 集群上分布式生成。推荐用于：
+- 大规模因子（100GB+），分布式 I/O 提供显著加速
+- 未安装 Rust 工具链的用户
+- 本地磁盘空间有限的环境
+
+在 `conf.yaml` 中配置：
+```yaml
+datagen:
+  engine: "spark"
+  spark:
+    parallelism: 32           # Spark 分区数（0 = 自动）
+    partitions_per_table: 0   # 每表分区数（0 = 根据规模自动）
+```
+
+### Rust 引擎（高性能）
+
+本地高性能生成器，并行上传到 GCS。使用双线程池架构：
 1. **Generator threads**: 并行生成所有 24 个 TPC-DS 表的 Parquet 文件
 2. **Uploader threads**: 并发上传完成的文件到 GCS
 
-### 性能优化
+推荐用于：
+- 较小的规模因子（1-100GB），单机性能足够
+- 在不启动集群的情况下生成数据
+- 对生成过程需要最大控制
+
+#### 性能优化
 
 Rust 生成器针对最大吞吐量进行了高度优化：
 
@@ -259,7 +295,7 @@ Rust 生成器针对最大吞吐量进行了高度优化：
 | **Batch processing** | 大批量上传（threads × 8）提高吞吐量 |
 | **LTO release build** | Link-time optimization，单 codegen unit |
 
-### 构建 Rust 生成器
+#### 构建 Rust 生成器
 
 前置条件：Rust 1.70+（通过 [rustup](https://rustup.rs/) 安装）
 
@@ -271,37 +307,25 @@ make datagen-build
 make datagen-test
 ```
 
-### 运行 Rust 生成器
+注意：当配置 `engine: "rust"` 时，`make data-gen` 会在未构建的情况下自动构建 Rust 二进制文件。
 
-```bash
-# 完整运行（生成并上传到 GCS）
-make datagen-run
+#### Rust 生成器配置
 
-# 试运行（本地生成，不上传）
-make datagen-dry-run
-
-# 自定义选项
-make datagen-custom SF=100 GEN_THREADS=16 UP_THREADS=8 FILE_MB=256
-
-# CLI 帮助
-./datagen/target/release/tpcds-datagen --help
-```
-
-### Rust 生成器配置
-
-在 `conf.yaml` 的 `datagen:` 部分配置：
+在 `conf.yaml` 的 `datagen.rust:` 部分配置：
 
 ```yaml
 datagen:
-  generator_threads: 8      # 数据生成线程数（默认：CPU 核心数）
-  uploader_threads: 4       # GCS 上传线程数
-  file_size_mb: 128         # 目标 Parquet 文件大小
-  temp_dir: "/tmp/tpcds-datagen"  # 本地临时目录
-  batch_size: 50000         # 每批行数（针对 Parquet row groups 优化）
-  cleanup_after_upload: true  # 上传后删除本地文件
+  engine: "rust"
+  rust:
+    generator_threads: 8      # 数据生成线程数（默认：CPU 核心数）
+    uploader_threads: 4       # GCS 上传线程数
+    file_size_mb: 128         # 目标 Parquet 文件大小
+    temp_dir: "/tmp/tpcds-datagen"  # 本地临时目录
+    batch_size: 50000         # 每批行数（针对 Parquet row groups 优化）
+    cleanup_after_upload: true  # 上传后删除本地文件
 ```
 
-### 性能建议
+#### 性能建议
 
 - **Scale factor 1-10**: 单机，4-8 generator threads
 - **Scale factor 100-1000**: 使用 16+ generator threads，8+ uploader threads
@@ -319,9 +343,11 @@ dataproc-tpcds/
 ├── Makefile                  # 所有 make 目标
 ├── lib/
 │   ├── cluster_manager.py    # Dataproc 集群创建/删除
-│   ├── data_generator.py     # TPC-DS 数据生成逻辑
+│   ├── data_generator.py     # TPC-DS 数据生成逻辑（引擎调度器）
 │   ├── query_runner.py       # Spark SQL 作业提交
 │   └── bq_reporter.py        # 指标收集和 BigQuery 上报
+├── datagen_spark/            # Spark 数据生成器
+│   └── tpcds_datagen.py      # PySpark TPC-DS 数据生成脚本
 ├── datagen/                  # 高性能 Rust 数据生成器
 │   ├── Cargo.toml            # Rust 依赖
 │   └── src/

@@ -98,21 +98,29 @@ benchmark:
   # Number of iterations per test run
   iterations: 1
 
-# --- Rust Data Generator Configuration ---
-# High-performance multi-threaded data generator with parallel GCS upload
+# --- Data Generator Configuration ---
+# Choose between "rust" (local high-performance) or "spark" (distributed on cluster)
 datagen:
-  # Number of generator threads (default: number of CPUs)
-  generator_threads: 8
-  # Number of uploader threads for parallel GCS uploads
-  uploader_threads: 4
-  # Target Parquet file size in MB (default: 128)
-  file_size_mb: 128
-  # Local temp directory for generated files before upload
-  temp_dir: "/tmp/tpcds-datagen"
-  # Batch size for row generation (default: 100000)
-  batch_size: 100000
-  # Whether to delete local files after upload (default: true)
-  cleanup_after_upload: true
+  # Engine: "rust" or "spark"
+  # - rust: High-performance local generator, uploads to GCS (requires Rust toolchain)
+  # - spark: Distributed generation on Dataproc cluster (no Rust dependency)
+  engine: "spark"
+
+  # --- Rust Engine Settings (only used when engine: "rust") ---
+  rust:
+    generator_threads: 8        # Number of data generation threads (default: CPU count)
+    uploader_threads: 4         # Number of GCS upload threads
+    file_size_mb: 128           # Target Parquet file size
+    temp_dir: "/tmp/tpcds-datagen"  # Local temp directory
+    batch_size: 100000          # Rows per batch
+    cleanup_after_upload: true  # Delete local files after upload
+
+  # --- Spark Engine Settings (only used when engine: "spark") ---
+  spark:
+    # Parallelism for data generation (default: num_workers * 4)
+    parallelism: 32
+    # Partitions per table (default: auto based on scale factor)
+    partitions_per_table: 0     # 0 = auto
 
 # --- BigQuery Reporting Configuration (Optional) ---
 bigquery:

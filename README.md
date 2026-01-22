@@ -21,7 +21,7 @@ This guide walks you through the complete benchmark process from setup to cleanu
 
 1. **Google Cloud SDK** installed and configured (`gcloud` CLI)
 2. **Python 3.8+** with pip
-3. **Rust 1.70+** (for high-performance data generator) - install via [rustup](https://rustup.rs/)
+3. **Rust 1.70+** (optional, only required for Rust data generator engine) - install via [rustup](https://rustup.rs/)
 4. **GCP Project** with these APIs enabled:
    - Compute Engine API
    - Dataproc API
@@ -45,9 +45,6 @@ cd dataproc-tpcds
 
 # Install Python dependencies
 pip install -r requirements.txt
-
-# Build Rust data generator (optional but recommended for performance)
-make datagen-build
 
 # Authenticate with Google Cloud
 gcloud auth application-default login
@@ -73,11 +70,19 @@ benchmark:
   data_path: "gs://your-bucket/tpcds-data/1T"
   data_format: "parquet"
 
-# Optional: Tune Rust data generator
+# Data Generator Engine Selection
 datagen:
-  generator_threads: 8
-  uploader_threads: 4
-  file_size_mb: 128
+  engine: "spark"  # "spark" (default) or "rust"
+
+  # Spark engine settings (distributed on Dataproc cluster)
+  spark:
+    parallelism: 32
+
+  # Rust engine settings (local high-performance, requires Rust toolchain)
+  rust:
+    generator_threads: 8
+    uploader_threads: 4
+    file_size_mb: 128
 ```
 
 ### Step 3: Validate Configuration
@@ -89,20 +94,30 @@ make dry-run
 
 ### Step 4: Generate TPC-DS Data
 
-Choose one option:
+> **Important:** Data generation and benchmarking are **independent operations**. You must generate data before running benchmarks. Data only needs to be generated **once per scale factor** - you can run multiple benchmarks against the same dataset.
+
+Data generation uses the engine specified in `conf.yaml` (`datagen.engine`):
 
 ```bash
-# Option A: Use high-performance Rust generator (recommended)
-make datagen-run
+# First, create the cluster (required for Spark engine)
+make cluster-create
 
-# Option B: Use Spark-based generator (slower but no Rust required)
+# Generate data using configured engine (spark or rust)
 make data-gen
 
 # Verify data was generated
 make data-check
 ```
 
+**Engine Selection:**
+- **`spark`** (default): Distributed generation on Dataproc cluster. No Rust dependency required. Faster for large scale factors (100GB+) due to distributed I/O. **Requires cluster to be running.**
+- **`rust`**: High-performance local generator with parallel GCS upload. Requires Rust toolchain. Can generate data without a cluster.
+
+**Data Reuse:** Once generated, the same dataset can be used for multiple benchmark runs. Set `skip_data_gen: true` in conf.yaml to skip data generation in subsequent runs, or simply don't run `make data-gen` again.
+
 ### Step 5: Run the Benchmark
+
+> **Prerequisite:** Ensure data has been generated (Step 4) before running benchmarks.
 
 ```bash
 # Interactive mode (prompts for cluster cleanup at end)
@@ -214,17 +229,14 @@ make cluster-status    # Check cluster status
 make cluster-info      # Show cluster config
 
 # Data Operations
-make data-gen          # Generate TPC-DS data only
+make data-gen          # Generate TPC-DS data (uses engine from config)
 make data-check        # Check if data exists
 make data-tables       # List available tables
 
-# Rust Data Generator (High-Performance)
+# Rust Data Generator (Development)
 make datagen-build     # Build Rust data generator (release)
 make datagen-test      # Run Rust datagen tests
-make datagen-run       # Generate data with GCS upload
-make datagen-dry-run   # Dry run (local only, no upload)
-make datagen-verbose   # Generate with verbose logging
-make datagen-clean     # Clean build artifacts
+make datagen-clean     # Clean Rust build artifacts
 
 # BigQuery
 make bq-setup          # Create BQ dataset/table
@@ -237,14 +249,38 @@ make list-queries      # List available SQL queries
 make show-query QUERY=q1  # Show specific query
 ```
 
-## High-Performance Rust Data Generator
+## Data Generation Engines
 
-For extreme performance data generation, use the Rust-based generator. It uses a dual-threadpool architecture:
+This tool supports two data generation engines. Choose based on your needs:
 
+### Spark Engine (Default)
+
+Distributed generation running on the Dataproc cluster. Recommended for:
+- Large scale factors (100GB+) where distributed I/O provides significant speedup
+- Users without Rust toolchain installed
+- Environments where local disk space is limited
+
+Configuration in `conf.yaml`:
+```yaml
+datagen:
+  engine: "spark"
+  spark:
+    parallelism: 32           # Number of Spark partitions (0 = auto)
+    partitions_per_table: 0   # Partitions per table (0 = auto based on scale)
+```
+
+### Rust Engine (High-Performance)
+
+Local high-performance generator with parallel GCS upload. Uses a dual-threadpool architecture:
 1. **Generator threads**: Generate Parquet files for all 24 TPC-DS tables in parallel
 2. **Uploader threads**: Upload completed files to GCS concurrently
 
-### Performance Optimizations
+Recommended for:
+- Smaller scale factors (1-100GB) where single-machine performance is sufficient
+- Generating data without spinning up a cluster
+- Maximum control over the generation process
+
+#### Performance Optimizations
 
 The Rust generator is highly optimized for maximum throughput:
 
@@ -259,7 +295,7 @@ The Rust generator is highly optimized for maximum throughput:
 | **Batch processing** | Large upload batches (threads × 8) for throughput |
 | **LTO release build** | Link-time optimization with single codegen unit |
 
-### Building the Rust Generator
+#### Building the Rust Generator
 
 Prerequisites: Rust 1.70+ (install via [rustup](https://rustup.rs/))
 
@@ -271,37 +307,25 @@ make datagen-build
 make datagen-test
 ```
 
-### Running the Rust Generator
+Note: When `engine: "rust"` is configured, `make data-gen` will automatically build the Rust binary if not already built.
 
-```bash
-# Full run (generate and upload to GCS)
-make datagen-run
+#### Rust Generator Configuration
 
-# Dry run (generate locally, no upload)
-make datagen-dry-run
-
-# With custom options
-make datagen-custom SF=100 GEN_THREADS=16 UP_THREADS=8 FILE_MB=256
-
-# CLI help
-./datagen/target/release/tpcds-datagen --help
-```
-
-### Rust Generator Configuration
-
-Configure in `conf.yaml` under `datagen:`:
+Configure in `conf.yaml` under `datagen.rust:`:
 
 ```yaml
 datagen:
-  generator_threads: 8      # Number of data generation threads (default: CPU count)
-  uploader_threads: 4       # Number of GCS upload threads
-  file_size_mb: 128         # Target Parquet file size
-  temp_dir: "/tmp/tpcds-datagen"  # Local temp directory
-  batch_size: 50000         # Rows per batch (optimized for Parquet row groups)
-  cleanup_after_upload: true  # Delete local files after upload
+  engine: "rust"
+  rust:
+    generator_threads: 8      # Number of data generation threads (default: CPU count)
+    uploader_threads: 4       # Number of GCS upload threads
+    file_size_mb: 128         # Target Parquet file size
+    temp_dir: "/tmp/tpcds-datagen"  # Local temp directory
+    batch_size: 50000         # Rows per batch (optimized for Parquet row groups)
+    cleanup_after_upload: true  # Delete local files after upload
 ```
 
-### Performance Tips
+#### Performance Tips
 
 - **Scale factor 1-10**: Single machine, 4-8 generator threads
 - **Scale factor 100-1000**: Use 16+ generator threads, 8+ uploader threads
@@ -319,9 +343,11 @@ dataproc-tpcds/
 ├── Makefile                  # All make targets
 ├── lib/
 │   ├── cluster_manager.py    # Dataproc cluster create/delete
-│   ├── data_generator.py     # TPC-DS data generation logic
+│   ├── data_generator.py     # TPC-DS data generation logic (engine dispatcher)
 │   ├── query_runner.py       # Spark SQL job submission
 │   └── bq_reporter.py        # Metrics collection and BigQuery reporting
+├── datagen_spark/            # Spark-based data generator
+│   └── tpcds_datagen.py      # PySpark TPC-DS data generation script
 ├── datagen/                  # High-performance Rust data generator
 │   ├── Cargo.toml            # Rust dependencies
 │   └── src/

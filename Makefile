@@ -22,7 +22,6 @@ NC := \033[0m # No Color
         bq-setup bq-query bq-schema \
         check-config check-auth validate \
         datagen-build datagen-build-debug datagen-test datagen-test-release \
-        datagen-run datagen-dry-run datagen-verbose datagen-custom \
         datagen-clean datagen-help \
         quick-start full-test status
 
@@ -201,23 +200,43 @@ history-status: check-config check-auth ## Check History Server status
 
 history-server-delete: history-delete ## Alias for history-delete
 
-##@ Data Operations
+##@ Data Operations (run before benchmarking, only once per scale factor)
 
-data-gen: check-config check-auth ## Generate TPC-DS data only
-	@echo "Generating TPC-DS data..."
+data-gen: check-config check-auth ## Generate TPC-DS data (requires cluster for spark engine)
+	@echo "Generating TPC-DS data using configured engine..."
+	@echo "Note: For spark engine, ensure cluster is running (make cluster-create)"
 	@$(PYTHON) -c "import yaml; from lib.data_generator import DataGenerator; \
 		config = yaml.safe_load(open('$(CONFIG)')); \
+		engine = config.get('datagen', {}).get('engine', 'spark'); \
+		print(f'Using {engine} engine for data generation'); \
 		dg = DataGenerator(config); \
-		result = dg.generate_data(); \
+		result = dg.generate_data_auto('$(CONFIG)'); \
 		print('Result:', result)"
 
-data-check: check-config check-auth ## Check if TPC-DS data exists
+data-check: check-config check-auth ## Check TPC-DS data existence and size
 	@echo "Checking TPC-DS data..."
 	@$(PYTHON) -c "import yaml; from lib.data_generator import DataGenerator; \
 		config = yaml.safe_load(open('$(CONFIG)')); \
 		dg = DataGenerator(config); \
-		exists = dg.data_exists(); \
-		print('Data exists:', exists)"
+		stats = dg.get_data_stats(); \
+		print(); \
+		print('=' * 60); \
+		print('TPC-DS Data Status Report'); \
+		print('=' * 60); \
+		print(f\"Data Path:      {stats['data_path']}\"); \
+		print(f\"Scale Factor:   {stats['scale_factor']} GB\"); \
+		print(f\"Data Exists:    {'YES' if stats['exists'] else 'NO'}\"); \
+		print(f\"Total Size:     {stats['total_size_human']}\"); \
+		print(f\"Tables Found:   {stats['table_count']} / 24\"); \
+		print('-' * 60); \
+		if stats['tables']: \
+			print('Table Details:'); \
+			for t in stats['tables']: \
+				print(f\"  {t['name']:30} {t['size_human']:>12}\"); \
+		else: \
+			print('No tables found. Run \"make data-gen\" to generate data.'); \
+		print('=' * 60); \
+		if stats.get('error'): print(f\"Error: {stats['error']}\")"
 
 data-tables: check-config check-auth ## List available TPC-DS tables
 	@echo "Listing TPC-DS tables..."
@@ -340,31 +359,6 @@ datagen-test: ## Run Rust data generator tests
 datagen-test-release: ## Run Rust data generator tests (release mode)
 	@echo "Running Rust datagen tests (release)..."
 	@cd datagen && cargo test --release
-
-datagen-run: datagen-build check-config ## Generate TPC-DS data with Rust generator
-	@echo "Generating TPC-DS data with Rust generator..."
-	@./datagen/target/release/tpcds-datagen --config $(CONFIG)
-
-datagen-dry-run: datagen-build check-config ## Dry run (generate locally, no upload)
-	@echo "Running Rust datagen in dry-run mode..."
-	@./datagen/target/release/tpcds-datagen --config $(CONFIG) --dry-run
-
-datagen-verbose: datagen-build check-config ## Generate with verbose logging
-	@echo "Generating TPC-DS data with verbose logging..."
-	@./datagen/target/release/tpcds-datagen --config $(CONFIG) --verbose
-
-datagen-custom: datagen-build check-config ## Run with custom options (SF, threads, etc.)
-	@echo "Running Rust datagen with custom options..."
-	@echo "Available options:"
-	@echo "  SF=N          Scale factor (overrides config)"
-	@echo "  GEN_THREADS=N Number of generator threads"
-	@echo "  UP_THREADS=N  Number of uploader threads"
-	@echo "  FILE_MB=N     File size in MB"
-	@./datagen/target/release/tpcds-datagen --config $(CONFIG) \
-		$(if $(SF),--scale-factor $(SF)) \
-		$(if $(GEN_THREADS),--generator-threads $(GEN_THREADS)) \
-		$(if $(UP_THREADS),--uploader-threads $(UP_THREADS)) \
-		$(if $(FILE_MB),--file-size-mb $(FILE_MB))
 
 datagen-clean: ## Clean Rust datagen build artifacts
 	@echo "Cleaning Rust datagen build artifacts..."

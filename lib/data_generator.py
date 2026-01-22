@@ -5,16 +5,18 @@ import os
 import subprocess
 import time
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from google.cloud import dataproc_v1
 from google.cloud import storage
-from google.api_core.exceptions import NotFound
 
 logger = logging.getLogger(__name__)
 
 # Path to the Rust datagen binary relative to project root
 RUST_DATAGEN_BINARY = "datagen/target/release/tpcds-datagen"
+
+# Path to the Spark datagen script relative to project root
+SPARK_DATAGEN_SCRIPT = "datagen_spark/tpcds_datagen.py"
 
 # TPC-DS table names
 TPCDS_TABLES = [
@@ -46,7 +48,7 @@ TPCDS_TABLES = [
 
 
 class DataGenerator:
-    """Generates TPC-DS data using Spark SQL on Dataproc."""
+    """Generates TPC-DS data using Spark on Dataproc or Rust generator."""
 
     def __init__(self, config: Dict[str, Any]):
         """Initialize DataGenerator with configuration.
@@ -98,198 +100,6 @@ class DataGenerator:
             logger.debug(f"Error checking data existence: {e}")
             return False
 
-    def _create_datagen_script(self) -> str:
-        """Create the PySpark data generation script."""
-        script = f'''
-import sys
-from pyspark.sql import SparkSession
-
-# TPC-DS Data Generation Script
-# Uses spark-sql-perf or tpcds-kit for data generation
-
-spark = SparkSession.builder \\
-    .appName("TPC-DS Data Generation") \\
-    .config("spark.sql.parquet.compression.codec", "{self.compression}") \\
-    .getOrCreate()
-
-# Import TPC-DS data generator
-# This assumes spark-sql-perf JAR is available
-try:
-    from py4j.java_gateway import java_import
-    java_import(spark._jvm, "com.databricks.spark.sql.perf.tpcds.*")
-
-    # Create TPC-DS tables object
-    tpcds = spark._jvm.com.databricks.spark.sql.perf.tpcds.TPCDSTables(
-        spark._jsparkSession,
-        "{self.data_path}/dsdgen",  # dsdgen tool location
-        "{self.scale_factor}"  # scale factor in GB
-    )
-
-    # Generate data
-    tpcds.genData(
-        "{self.data_path}",
-        "{self.data_format}",
-        True,  # overwrite
-        True,  # partition tables
-        False, # cluster by partition columns
-        False, # filter out null partition values
-        ""     # table filter
-    )
-
-except Exception as e:
-    print(f"spark-sql-perf not available, using manual generation: {{e}}")
-
-    # Fallback: Generate sample data for testing
-    # In production, you would use proper TPC-DS data generation tools
-    from pyspark.sql.types import *
-    from pyspark.sql.functions import *
-    import random
-
-    # Generate date_dim table
-    date_data = [(i, f"2020-{{str((i % 365) // 30 + 1).zfill(2)}}-{{str((i % 30) + 1).zfill(2)}}",
-                  2020 + i // 365, (i % 365) // 30 + 1, (i % 30) + 1)
-                 for i in range(1, 73050)]  # 200 years of dates
-    date_schema = StructType([
-        StructField("d_date_sk", IntegerType(), False),
-        StructField("d_date", StringType(), True),
-        StructField("d_year", IntegerType(), True),
-        StructField("d_moy", IntegerType(), True),
-        StructField("d_dom", IntegerType(), True),
-    ])
-    date_df = spark.createDataFrame(date_data, date_schema)
-    date_df.write.mode("overwrite").{self.data_format}("{self.data_path}/date_dim")
-
-    # Generate item table
-    item_data = [(i, f"item_{{i}}", random.uniform(1, 1000), f"brand_{{i % 100}}", f"class_{{i % 50}}")
-                 for i in range(1, 18001)]
-    item_schema = StructType([
-        StructField("i_item_sk", IntegerType(), False),
-        StructField("i_item_id", StringType(), True),
-        StructField("i_current_price", DoubleType(), True),
-        StructField("i_brand", StringType(), True),
-        StructField("i_class", StringType(), True),
-    ])
-    item_df = spark.createDataFrame(item_data, item_schema)
-    item_df.write.mode("overwrite").{self.data_format}("{self.data_path}/item")
-
-    # Generate store_sales table (main fact table)
-    num_rows = {self.scale_factor} * 10000  # Scale based on factor
-    sales_df = spark.range(1, num_rows + 1).select(
-        col("id").alias("ss_sold_date_sk"),
-        (col("id") % 18000 + 1).alias("ss_item_sk"),
-        (col("id") % 1000 + 1).alias("ss_customer_sk"),
-        (col("id") % 100 + 1).alias("ss_store_sk"),
-        (rand() * 1000).alias("ss_sales_price"),
-        (rand() * 100).cast(IntegerType()).alias("ss_quantity"),
-        (rand() * 1000).alias("ss_net_profit")
-    )
-    sales_df.write.mode("overwrite").{self.data_format}("{self.data_path}/store_sales")
-
-    # Generate customer table
-    cust_data = [(i, f"CUST{{str(i).zfill(8)}}", f"First_{{i}}", f"Last_{{i}}",
-                  random.randint(1, 100000)) for i in range(1, 100001)]
-    cust_schema = StructType([
-        StructField("c_customer_sk", IntegerType(), False),
-        StructField("c_customer_id", StringType(), True),
-        StructField("c_first_name", StringType(), True),
-        StructField("c_last_name", StringType(), True),
-        StructField("c_current_addr_sk", IntegerType(), True),
-    ])
-    cust_df = spark.createDataFrame(cust_data, cust_schema)
-    cust_df.write.mode("overwrite").{self.data_format}("{self.data_path}/customer")
-
-    # Generate store table
-    store_data = [(i, f"STORE{{str(i).zfill(6)}}", f"Store {{i}}", f"City {{i % 100}}")
-                  for i in range(1, 1001)]
-    store_schema = StructType([
-        StructField("s_store_sk", IntegerType(), False),
-        StructField("s_store_id", StringType(), True),
-        StructField("s_store_name", StringType(), True),
-        StructField("s_city", StringType(), True),
-    ])
-    store_df = spark.createDataFrame(store_data, store_schema)
-    store_df.write.mode("overwrite").{self.data_format}("{self.data_path}/store")
-
-    print("Sample TPC-DS data generated successfully")
-
-spark.stop()
-print("Data generation completed!")
-'''
-        return script
-
-    def _upload_script(self, script: str) -> str:
-        """Upload the datagen script to GCS."""
-        bucket = self.storage_client.bucket(self.staging_bucket)
-        blob_path = "scripts/tpcds_datagen.py"
-        blob = bucket.blob(blob_path)
-        blob.upload_from_string(script)
-        return f"gs://{self.staging_bucket}/{blob_path}"
-
-    def generate_data(self) -> Dict[str, Any]:
-        """Generate TPC-DS data by submitting a Spark job.
-
-        Returns:
-            Dictionary with job result information
-        """
-        if self.config["benchmark"].get("skip_data_gen", False):
-            logger.info("Data generation skipped (skip_data_gen=true)")
-            return {"status": "SKIPPED", "message": "Data generation skipped"}
-
-        if self.data_exists():
-            logger.info("Data already exists, skipping generation")
-            return {"status": "SKIPPED", "message": "Data already exists"}
-
-        logger.info(f"Generating TPC-DS data (scale={self.scale_factor}GB)...")
-
-        # Create and upload the data generation script
-        script = self._create_datagen_script()
-        script_gcs_path = self._upload_script(script)
-
-        # Submit PySpark job
-        job = {
-            "placement": {"cluster_name": self.cluster_name},
-            "pyspark_job": {
-                "main_python_file_uri": script_gcs_path,
-                "properties": {
-                    "spark.executor.memory": self.dataproc_config["spark_properties"].get(
-                        "spark.executor.memory", "6g"
-                    ),
-                    "spark.executor.cores": self.dataproc_config["spark_properties"].get(
-                        "spark.executor.cores", "2"
-                    ),
-                },
-            },
-        }
-
-        try:
-            operation = self.job_client.submit_job_as_operation(
-                project_id=self.project_id,
-                region=self.region,
-                job=job,
-            )
-
-            logger.info("Waiting for data generation job to complete...")
-            result = operation.result()
-
-            job_id = result.reference.job_id
-            status = result.status.state.name
-
-            logger.info(f"Data generation job {job_id} completed with status: {status}")
-
-            return {
-                "status": status,
-                "job_id": job_id,
-                "data_path": self.data_path,
-                "scale_factor": self.scale_factor,
-            }
-
-        except Exception as e:
-            logger.error(f"Data generation failed: {e}")
-            return {
-                "status": "FAILED",
-                "error": str(e),
-            }
-
     def list_tables(self) -> list:
         """List available TPC-DS tables in the data path."""
         try:
@@ -314,11 +124,127 @@ print("Data generation completed!")
             logger.error(f"Error listing tables: {e}")
             return []
 
+    def get_data_stats(self) -> Dict[str, Any]:
+        """Get statistics about the TPC-DS data at the target path.
+
+        Returns:
+            Dictionary with:
+                - exists: bool - whether data exists
+                - total_size_bytes: int - total size in bytes
+                - total_size_human: str - human-readable size
+                - table_count: int - number of tables found
+                - tables: list - table names with sizes
+                - data_path: str - the data path
+                - scale_factor: int - configured scale factor
+        """
+        try:
+            path = self.data_path.replace("gs://", "")
+            bucket_name = path.split("/")[0]
+            prefix = "/".join(path.split("/")[1:])
+            if prefix and not prefix.endswith("/"):
+                prefix += "/"
+
+            bucket = self.storage_client.bucket(bucket_name)
+
+            # Get all blobs under the data path
+            blobs = bucket.list_blobs(prefix=prefix)
+
+            total_size = 0
+            table_sizes: Dict[str, int] = {}
+
+            for blob in blobs:
+                total_size += blob.size
+                # Extract table name from path
+                relative_path = blob.name[len(prefix):]
+                if "/" in relative_path:
+                    table_name = relative_path.split("/")[0]
+                    if table_name and not table_name.startswith("_"):
+                        table_sizes[table_name] = table_sizes.get(table_name, 0) + blob.size
+
+            # Convert to human-readable size
+            def human_size(size_bytes: int) -> str:
+                for unit in ["B", "KB", "MB", "GB", "TB"]:
+                    if size_bytes < 1024:
+                        return f"{size_bytes:.2f} {unit}"
+                    size_bytes /= 1024
+                return f"{size_bytes:.2f} PB"
+
+            tables_with_sizes = [
+                {"name": name, "size_bytes": size, "size_human": human_size(size)}
+                for name, size in sorted(table_sizes.items())
+            ]
+
+            exists = len(table_sizes) > 0
+
+            return {
+                "exists": exists,
+                "total_size_bytes": total_size,
+                "total_size_human": human_size(total_size),
+                "table_count": len(table_sizes),
+                "tables": tables_with_sizes,
+                "data_path": self.data_path,
+                "scale_factor": self.scale_factor,
+            }
+
+        except Exception as e:
+            logger.error(f"Error getting data stats: {e}")
+            return {
+                "exists": False,
+                "total_size_bytes": 0,
+                "total_size_human": "0 B",
+                "table_count": 0,
+                "tables": [],
+                "data_path": self.data_path,
+                "scale_factor": self.scale_factor,
+                "error": str(e),
+            }
+
     def _rust_datagen_available(self) -> bool:
         """Check if the Rust datagen binary is available."""
         project_root = Path(__file__).parent.parent
         binary_path = project_root / RUST_DATAGEN_BINARY
         return binary_path.exists() and os.access(binary_path, os.X_OK)
+
+    def _build_rust_datagen(self) -> bool:
+        """Build the Rust datagen binary if not already built.
+
+        Returns:
+            True if build succeeded or binary already exists, False otherwise
+        """
+        if self._rust_datagen_available():
+            logger.info("Rust datagen binary already exists")
+            return True
+
+        project_root = Path(__file__).parent.parent
+        datagen_dir = project_root / "datagen"
+
+        if not datagen_dir.exists():
+            logger.error("Rust datagen source directory not found")
+            return False
+
+        logger.info("Building Rust datagen binary (release mode)...")
+
+        try:
+            result = subprocess.run(
+                ["cargo", "build", "--release"],
+                cwd=datagen_dir,
+                capture_output=True,
+                text=True,
+            )
+
+            if result.returncode == 0:
+                logger.info("Rust datagen build completed successfully")
+                return True
+            else:
+                logger.error(f"Rust datagen build failed: {result.stderr}")
+                return False
+
+        except FileNotFoundError:
+            logger.error("Rust toolchain (cargo) not found. Please install Rust.")
+            return False
+        except Exception as e:
+            logger.error(f"Error building Rust datagen: {e}")
+            return False
 
     def generate_data_rust(self, config_path: str = "conf.yaml", verbose: bool = False) -> Dict[str, Any]:
         """Generate TPC-DS data using the high-performance Rust generator.
@@ -397,10 +323,125 @@ print("Data generation completed!")
                 "error": str(e),
             }
 
-    def generate_data_auto(self, config_path: str = "conf.yaml") -> Dict[str, Any]:
-        """Generate TPC-DS data using the best available method.
+    def generate_data_spark(self) -> Dict[str, Any]:
+        """Generate TPC-DS data using PySpark on Dataproc cluster.
 
-        Prefers Rust generator for performance, falls back to Spark if unavailable.
+        This method submits a PySpark job to the Dataproc cluster to generate
+        TPC-DS data in a distributed manner. The job is submitted to the
+        benchmark cluster configured in conf.yaml.
+
+        Returns:
+            Dictionary with generation result information
+        """
+        if self.config["benchmark"].get("skip_data_gen", False):
+            logger.info("Data generation skipped (skip_data_gen=true)")
+            return {"status": "SKIPPED", "message": "Data generation skipped"}
+
+        if self.data_exists():
+            logger.info("Data already exists, skipping generation")
+            return {"status": "SKIPPED", "message": "Data already exists"}
+
+        logger.info(f"Generating TPC-DS data using Spark on cluster '{self.cluster_name}' "
+                   f"(scale={self.scale_factor}GB)...")
+
+        # Upload the Spark datagen script to GCS
+        project_root = Path(__file__).parent.parent
+        script_path = project_root / SPARK_DATAGEN_SCRIPT
+
+        if not script_path.exists():
+            logger.error(f"Spark datagen script not found: {script_path}")
+            return {
+                "status": "FAILED",
+                "error": f"Spark datagen script not found: {SPARK_DATAGEN_SCRIPT}"
+            }
+
+        # Read and upload script
+        with open(script_path, "r") as f:
+            script_content = f.read()
+
+        bucket = self.storage_client.bucket(self.staging_bucket)
+        blob_path = "scripts/tpcds_datagen_spark.py"
+        blob = bucket.blob(blob_path)
+        blob.upload_from_string(script_content)
+        script_gcs_path = f"gs://{self.staging_bucket}/{blob_path}"
+
+        logger.info(f"Uploaded Spark datagen script to {script_gcs_path}")
+
+        # Get Spark settings from datagen config
+        datagen_config = self.config.get("datagen", {})
+        spark_settings = datagen_config.get("spark", {})
+        parallelism = spark_settings.get("parallelism", 0)
+
+        # Submit PySpark job to the benchmark cluster
+        job = {
+            "placement": {"cluster_name": self.cluster_name},
+            "pyspark_job": {
+                "main_python_file_uri": script_gcs_path,
+                "args": [
+                    "--scale-factor", str(self.scale_factor),
+                    "--output-path", self.data_path,
+                    "--format", self.data_format,
+                    "--compression", self.compression,
+                    "--parallelism", str(parallelism),
+                ],
+                "properties": {
+                    "spark.executor.memory": self.dataproc_config["spark_properties"].get(
+                        "spark.executor.memory", "6g"
+                    ),
+                    "spark.executor.cores": self.dataproc_config["spark_properties"].get(
+                        "spark.executor.cores", "2"
+                    ),
+                    "spark.sql.adaptive.enabled": "true",
+                    "spark.sql.adaptive.coalescePartitions.enabled": "true",
+                },
+            },
+        }
+
+        try:
+            start_time = time.time()
+
+            operation = self.job_client.submit_job_as_operation(
+                project_id=self.project_id,
+                region=self.region,
+                job=job,
+            )
+
+            logger.info("Waiting for Spark data generation job to complete...")
+            result = operation.result()
+
+            elapsed_time = time.time() - start_time
+            job_id = result.reference.job_id
+            status = result.status.state.name
+
+            logger.info(f"Spark data generation job {job_id} completed with status: {status}")
+            logger.info(f"Elapsed time: {elapsed_time:.2f}s")
+
+            return {
+                "status": status,
+                "generator": "spark",
+                "job_id": job_id,
+                "data_path": self.data_path,
+                "scale_factor": self.scale_factor,
+                "elapsed_seconds": elapsed_time,
+            }
+
+        except Exception as e:
+            logger.error(f"Spark data generation failed: {e}")
+            return {
+                "status": "FAILED",
+                "generator": "spark",
+                "error": str(e),
+            }
+
+    def generate_data_auto(self, config_path: str = "conf.yaml") -> Dict[str, Any]:
+        """Generate TPC-DS data using the configured engine.
+
+        The engine is determined by the 'datagen.engine' configuration:
+        - "spark" (default): Use distributed PySpark generation on Dataproc cluster
+        - "rust": Use the high-performance Rust generator (requires Rust toolchain)
+
+        The Spark engine submits jobs to the benchmark cluster, so ensure the
+        cluster is created before calling this method.
 
         Args:
             config_path: Path to the configuration file
@@ -409,13 +450,27 @@ print("Data generation completed!")
             Dictionary with generation result information
         """
         datagen_config = self.config.get("datagen", {})
-        use_rust = datagen_config.get("use_rust", True)  # Default to Rust if available
+        engine = datagen_config.get("engine", "spark").lower()
 
-        if use_rust and self._rust_datagen_available():
-            logger.info("Using Rust data generator for high-performance generation")
+        if engine == "spark":
+            logger.info("Using Spark data generator (configured engine: spark)")
+            return self.generate_data_spark()
+
+        elif engine == "rust":
+            logger.info("Using Rust data generator (configured engine: rust)")
+
+            # Build Rust binary if needed
+            if not self._build_rust_datagen():
+                return {
+                    "status": "FAILED",
+                    "error": "Failed to build Rust datagen. Check Rust toolchain installation."
+                }
+
             return self.generate_data_rust(config_path)
+
         else:
-            if use_rust and not self._rust_datagen_available():
-                logger.warning("Rust datagen not available, falling back to Spark")
-            logger.info("Using Spark-based data generator")
-            return self.generate_data()
+            logger.error(f"Unknown datagen engine: {engine}. Use 'spark' or 'rust'.")
+            return {
+                "status": "FAILED",
+                "error": f"Unknown datagen engine: {engine}. Valid options: 'spark', 'rust'"
+            }
