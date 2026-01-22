@@ -1,0 +1,18 @@
+# GCP Dataproc TPC-DS Auto-Benchmark Tool Dependencies
+
+# Google Cloud Libraries
+google-cloud-dataproc>=5.4.0
+google-cloud-storage>=2.10.0
+google-cloud-bigquery>=3.11.0
+google-api-core>=2.11.0
+
+# Configuration
+PyYAML>=6.0
+
+# Testing (dev dependencies)
+pytest>=7.4.0
+pytest-cov>=4.1.0
+pytest-mock>=3.11.0
+
+# Type hints
+typing-extensions>=4.7.0

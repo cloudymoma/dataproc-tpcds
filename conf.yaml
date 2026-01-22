@@ -1,0 +1,121 @@
+# GCP Dataproc TPC-DS Auto-Benchmark Tool Configuration
+# This is the only file users need to modify
+
+# --- Google Cloud Basic Configuration ---
+gcp:
+  project_id: "du-hast-mich"
+  region: "us-central1"
+  zone: "us-central1-a"
+  # Service Account JSON path, leave empty to use default credentials
+  service_account_key_path: "~/workspace/google/sa.json"
+  # GCS Bucket for temporary scripts, JAR packages and TPC-DS data
+  staging_bucket: "gs://du-hast-mich-tpcds-bench"
+
+# --- Spark History Server Configuration (Optional) ---
+# A dedicated single-node cluster for viewing Spark job history
+history_server:
+  enable: true
+  cluster_name: "tpcds-history-server"
+  machine_type: "n2-standard-4"
+  boot_disk_size_gb: 128
+  # GCS path for Spark event logs (shared with job cluster)
+  log_dir: "gs://du-hast-mich-tpcds-bench/spark-events"
+  # Spark properties for History Server
+  spark_properties:
+    "spark.history.fs.cleaner.enabled": "true"
+    "spark.history.fs.cleaner.interval": "7d"
+    "spark.history.fs.cleaner.maxAge": "30d"
+    "spark.eventLog.rolling.enabled": "true"
+    "spark.eventLog.rolling.maxFileSize": "128m"
+
+# --- Dataproc Job Cluster Configuration ---
+dataproc:
+  cluster_name: "tpcds-bench-cluster"
+  image_version: "2.3-debian12"  # Determines Spark version
+
+  # Cluster lifecycle
+  max_idle: "1h"                 # Auto-delete after idle period (e.g., "30m", "1h", "2h")
+  tier: "premium"                # "standard" or "premium" (premium enables Lightning Engine)
+
+  # Master node configuration
+  master_machine_type: "n2-standard-4"
+  master_boot_disk_size_gb: 128
+  master_boot_disk_type: "pd-balanced"
+
+  # Worker nodes configuration
+  worker_machine_type: "n2-standard-8"
+  num_workers: 4                 # 1TB recommends at least 4-8 workers
+  worker_boot_disk_size_gb: 500
+  worker_boot_disk_type: "pd-ssd"
+  num_worker_local_ssds: 1
+  worker_local_ssd_interface: "NVME"
+
+  enable_component_gateway: true
+
+  # Initialization scripts (optional)
+  init_actions: []
+
+  # Spark tuning parameters
+  spark_properties:
+    # Executor settings
+    "spark.executor.memory": "6g"
+    "spark.executor.cores": "2"
+    # Serialization
+    "spark.serializer": "org.apache.spark.serializer.KryoSerializer"
+    # Adaptive Query Execution (AQE)
+    "spark.sql.adaptive.enabled": "true"
+    "spark.sql.adaptive.coalescePartitions.enabled": "true"
+    "spark.sql.adaptive.skewJoin.enabled": "true"
+    # Dataproc enhanced optimizer and execution
+    "spark.dataproc.enhanced.optimizer.enabled": "true"
+    "spark.dataproc.enhanced.execution.enabled": "true"
+    # GCS FileSystem configuration
+    "spark.hadoop.fs.gs.impl": "com.google.cloud.hadoop.fs.gcs.GoogleHadoopFileSystem"
+    "spark.hadoop.fs.AbstractFileSystem.gs.impl": "com.google.cloud.hadoop.fs.gcs.GoogleHadoopFS"
+    # Dataproc file output committer (optimized for concurrent writes)
+    "spark.hadoop.mapreduce.outputcommitter.factory.class": "org.apache.hadoop.mapreduce.lib.output.DataprocFileOutputCommitterFactory"
+    "spark.hadoop.mapreduce.fileoutputcommitter.marksuccessfuljobs": "false"
+    # Event logging (for History Server integration)
+    "spark.eventLog.enabled": "true"
+    "spark.eventLog.dir": "gs://du-hast-mich-tpcds-bench/spark-events"
+    "spark.eventLog.rolling.enabled": "true"
+    "spark.eventLog.rolling.maxFileSize": "128m"
+  # Dataproc cluster properties
+  dataproc_properties:
+    "dataproc.cluster.caching.enabled": "true"
+
+# --- TPC-DS Benchmark Configuration ---
+benchmark:
+  scale_factor: 1000            # GB, e.g., 1000 = 1TB
+  data_format: "parquet"        # parquet or orc
+  format_compression: "snappy"
+  # GCS path for data storage
+  data_path: "gs://du-hast-mich-tpcds-bench/tpcds-data/1T"
+  # Skip data generation if data already exists
+  skip_data_gen: false
+  # Queries to run: "all" or list like [1, 2, 3]
+  queries_to_run: "all"
+  # Number of iterations per test run
+  iterations: 1
+
+# --- Rust Data Generator Configuration ---
+# High-performance multi-threaded data generator with parallel GCS upload
+datagen:
+  # Number of generator threads (default: number of CPUs)
+  generator_threads: 8
+  # Number of uploader threads for parallel GCS uploads
+  uploader_threads: 4
+  # Target Parquet file size in MB (default: 128)
+  file_size_mb: 128
+  # Local temp directory for generated files before upload
+  temp_dir: "/tmp/tpcds-datagen"
+  # Batch size for row generation (default: 100000)
+  batch_size: 100000
+  # Whether to delete local files after upload (default: true)
+  cleanup_after_upload: true
+
+# --- BigQuery Reporting Configuration (Optional) ---
+bigquery:
+  enable: true
+  dataset: "tpcds_metrics"
+  table: "benchmark_history"

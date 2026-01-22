@@ -1,0 +1,181 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+
+# Translations
+*.mo
+*.pot
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Jupyter
+.ipynb_checkpoints
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project specific
+*.log
+
+# Keep jar directory but ignore jar files
+jar/*.jar
+!jar/.gitkeep
+
+# Error and status tracking
+ERROR.md
+CLAUDE.md
+plan-claude.md
+
+# ======================
+# Credentials & Secrets
+# ======================
+# GCP Service Account Keys
+sa-key.json
+sa.json
+*.credentials.json
+*-credentials.json
+credentials*.json
+service-account*.json
+service_account*.json
+google-credentials.json
+application_default_credentials.json
+
+# Private keys and certificates
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.cer
+
+# Secret files
+*.secret
+*.secrets
+secrets/
+secrets.yaml
+secrets.yml
+.secrets/
+
+# Environment files with secrets
+.env
+.env.*
+.envrc
+*.local
+
+# GCloud config (should use ADC instead)
+.gcloud/
+
+# ======================
+# Rust / Cargo
+# ======================
+# Rust build artifacts and binaries
+target/
+datagen/target/
+**/*.rs.bk
+
+# ======================
+# Generated Data Files
+# ======================
+# Parquet and ORC data files
+*.parquet
+*.orc
+
+# Generated data directories
+data/
+output/
+generated/
+
+# Temp directories
+.tmp/
+tmp/
+temp/
+*.tmp
+*.temp
+*.bak
+
+# TPC-DS specific temp
+/tmp/tpcds-datagen/
+
+# ======================
+# Additional IDE/Editor
+# ======================
+*.sublime-project
+*.sublime-workspace
+.project
+.classpath
+.settings/
+*.iml
+
+# ======================
+# macOS
+# ======================
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# ======================
+# Linux
+# ======================
+*~
+.fuse_hidden*
+.Trash-*
+.nfs*
