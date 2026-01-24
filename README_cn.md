@@ -1,5 +1,3 @@
-[![Rust Build](https://github.com/cloudymoma/dataproc-tpcds/actions/workflows/rust.yml/badge.svg)](https://github.com/cloudymoma/dataproc-tpcds/actions/workflows/rust.yml)
-
 [English](README.md) | 简体中文
 
 # GCP Dataproc TPC-DS 自动化基准测试工具
@@ -21,8 +19,7 @@
 
 1. **Google Cloud SDK** 已安装并配置（`gcloud` CLI）
 2. **Python 3.8+** 及 pip
-3. **Rust 1.70+**（可选，仅 Rust 数据生成引擎需要）- 通过 [rustup](https://rustup.rs/) 安装
-4. **GCP 项目** 需启用以下 API：
+3. **GCP 项目** 需启用以下 API：
    - Compute Engine API
    - Dataproc API
    - Cloud Storage API
@@ -70,19 +67,12 @@ benchmark:
   data_path: "gs://your-bucket/tpcds-data/1T"
   data_format: "parquet"
 
-# 数据生成引擎选择
+# 数据生成配置（spark-sql-perf）
 datagen:
-  engine: "spark"  # "spark"（默认）或 "rust"
-
-  # Spark 引擎设置（在 Dataproc 集群上分布式运行）
-  spark:
-    parallelism: 32
-
-  # Rust 引擎设置（本地高性能，需要 Rust 工具链）
-  rust:
-    generator_threads: 8
-    uploader_threads: 4
-    file_size_mb: 128
+  num_partitions: 0              # 自动计算（约 128MB 文件）
+  partition_tables: true         # 分区大表
+  spark_sql_perf_version: "0.5.1"
+  tpcds_kit_version: "1.0.0"
 ```
 
 ### 步骤 3：验证配置
@@ -96,22 +86,22 @@ make dry-run
 
 > **重要：** 数据生成和基准测试是**独立的操作**。必须在运行基准测试之前生成数据。每个规模因子只需生成**一次**数据 - 您可以对同一数据集运行多次基准测试。
 
-数据生成使用 `conf.yaml` 中指定的引擎（`datagen.engine`）：
+数据使用 [spark-sql-perf](https://github.com/databricks/spark-sql-perf) 和原生 `dsdgen` 二进制文件生成，确保完全符合 TPC-DS 规范（所有 24 个表的正确 schema）。
 
 ```bash
-# 首先创建集群（Spark 引擎需要）
+# 首先创建集群
 make cluster-create
 
-# 使用配置的引擎（spark 或 rust）生成数据
+# 使用 spark-sql-perf 在 Dataproc 上生成数据
 make data-gen
 
-# 验证数据是否已生成
+# 验证数据是否已生成（检查全部 24 个表）
 make data-check
 ```
 
-**引擎选择：**
-- **`spark`**（默认）：在 Dataproc 集群上分布式生成。无需 Rust 依赖。对于大规模因子（100GB+），由于分布式 I/O 提供显著加速。**需要集群正在运行。**
-- **`rust`**：本地高性能生成器，并行上传到 GCS。需要 Rust 工具链。可以在没有集群的情况下生成数据。
+**首次设置：** 生成数据前，需要预构建的资产（JAR 和 dsdgen 二进制文件）。可以：
+1. 从 releases 下载预构建资产
+2. 自行构建：`make build-assets`（需要 Linux 系统和 SBT、GCC、Make）
 
 **数据复用：** 生成后，同一数据集可用于多次基准测试运行。在 conf.yaml 中设置 `skip_data_gen: true` 以在后续运行中跳过数据生成，或者直接不再运行 `make data-gen`。
 
@@ -217,10 +207,10 @@ make run-auto-delete   # 运行并在完成后自动删除集群
 make run-verbose       # 详细日志运行
 
 # 测试
-make test              # 运行所有测试（Python）
+make test              # 运行所有测试
 make test-cov          # 运行测试并生成覆盖率报告
 make check-syntax      # 验证 Python 语法
-make full-test         # 运行所有测试（Python + Rust）
+make full-test         # 运行所有测试
 
 # 集群操作
 make cluster-create    # 仅创建 Dataproc 集群
@@ -229,14 +219,10 @@ make cluster-status    # 检查集群状态
 make cluster-info      # 显示集群配置
 
 # 数据操作
-make data-gen          # 生成 TPC-DS 数据（使用配置中的引擎）
-make data-check        # 检查数据是否存在
+make data-gen          # 使用 spark-sql-perf 生成 TPC-DS 数据
+make data-check        # 检查数据是否存在及完整性
 make data-tables       # 列出可用表
-
-# Rust 数据生成器（开发用）
-make datagen-build     # 构建 Rust 数据生成器（release）
-make datagen-test      # 运行 Rust datagen 测试
-make datagen-clean     # 清理 Rust 构建产物
+make build-assets      # 构建 spark-sql-perf 资产（一次性设置）
 
 # BigQuery
 make bq-setup          # 创建 BQ 数据集/表
@@ -249,89 +235,101 @@ make list-queries      # 列出可用 SQL 查询
 make show-query QUERY=q1  # 显示指定查询
 ```
 
-## 数据生成引擎
+## 数据生成
 
-本工具支持两种数据生成引擎。根据您的需求选择：
+本工具使用 Databricks 的 [spark-sql-perf](https://github.com/databricks/spark-sql-perf) 进行 TPC-DS 数据生成。这种方式提供：
 
-### Spark 引擎（默认）
+- **完全符合 TPC-DS 规范**: 所有 24 个表的正确 schema
+- **原生 dsdgen 二进制文件**: 使用官方 TPC-DS 数据生成器
+- **分布式生成**: 在 Dataproc 集群上运行，具有可扩展性
+- **优化分区**: 自动计算，目标约 128MB Parquet 文件
 
-在 Dataproc 集群上分布式生成。推荐用于：
-- 大规模因子（100GB+），分布式 I/O 提供显著加速
-- 未安装 Rust 工具链的用户
-- 本地磁盘空间有限的环境
+### 配置
 
-在 `conf.yaml` 中配置：
 ```yaml
 datagen:
-  engine: "spark"
-  spark:
-    parallelism: 32           # Spark 分区数（0 = 自动）
-    partitions_per_table: 0   # 每表分区数（0 = 根据规模自动）
+  num_partitions: 0              # 自动计算（scale_factor * 8）
+  partition_tables: true         # 分区大型事实表
+  cluster_by_partition_columns: true
+  spark_sql_perf_version: "0.5.1"
+  tpcds_kit_version: "1.0.0"
 ```
 
-### Rust 引擎（高性能）
+### 分区计算
 
-本地高性能生成器，并行上传到 GCS。使用双线程池架构：
-1. **Generator threads**: 并行生成所有 24 个 TPC-DS 表的 Parquet 文件
-2. **Uploader threads**: 并发上传完成的文件到 GCS
+分区数自动计算，目标约 128MB Parquet 文件：
 
-推荐用于：
-- 较小的规模因子（1-100GB），单机性能足够
-- 在不启动集群的情况下生成数据
-- 对生成过程需要最大控制
+| 规模因子 | 分区数 | 大约文件大小 |
+|----------|--------|-------------|
+| 1 GB | 100（最小） | ~10MB |
+| 100 GB | 800 | ~128MB |
+| 1000 GB (1TB) | 8000 | ~128MB |
+| 10000 GB (10TB) | 50000（最大） | ~200MB |
 
-#### 性能优化
+### 预构建资产
 
-Rust 生成器针对最大吞吐量进行了高度优化：
+本仓库包含适用于 **Linux x86_64** 架构的预构建资产，位于 `assets/` 目录：
 
-| 优化项 | 描述 |
-|--------|------|
-| **Static lookup tables** | 20+ 预计算数组，实现零分配字符串生成 |
-| **itoa fast formatting** | 比 format!() 快约 3 倍的整数转字符串 |
-| **Cached distributions** | 预计算的随机分布，跨批次复用 |
-| **Zero-copy appends** | 直接 StringBuilder append，无中间分配 |
-| **Capacity pre-allocation** | 预估字符串长度以最小化重新分配 |
-| **Optimized compression** | ZSTD level 3、GZIP level 6，针对速度调优 |
-| **Batch processing** | 大批量上传（threads × 8）提高吞吐量 |
-| **LTO release build** | Link-time optimization，单 codegen unit |
+- `assets/spark-sql-perf-assembly-0.5.1.jar` - 包含所有依赖的 Fat JAR
+- `assets/tpcds-kit-1.0.0.tar.gz` - Linux x86_64 原生 dsdgen 二进制文件
 
-#### 构建 Rust 生成器
+这些资产在数据生成期间会上传到您的 Dataproc 集群。`dsdgen` 二进制文件是**原生可执行文件**，必须与您的集群架构匹配。
 
-前置条件：Rust 1.70+（通过 [rustup](https://rustup.rs/) 安装）
+> **架构要求：** 预构建的 `dsdgen` 二进制文件是为 Linux x86_64 编译的，这是 GCP Dataproc 集群的默认架构。如果您的作业集群使用不同的架构（例如基于 ARM 的实例），您必须自行构建资产以匹配集群的 CPU 架构。
+
+### 构建资产（可选）
+
+如果预构建资产与您的集群架构不匹配，或您想使用更新版本，请自行构建：
 
 ```bash
-# 构建 release 二进制文件（带 LTO 优化）
-make datagen-build
-
-# 运行测试
-make datagen-test
+# 前置条件：git, sbt, make, gcc, Java 11
+# 在与目标 Dataproc 集群架构匹配的 Linux 系统上运行
+make build-assets
 ```
 
-注意：当配置 `engine: "rust"` 时，`make data-gen` 会在未构建的情况下自动构建 Rust 二进制文件。
+`make build-assets` 目标会：
+1. 克隆（或更新）[spark-sql-perf](https://github.com/databricks/spark-sql-perf) 仓库
+2. 使用 SBT 构建 assembly JAR
+3. 克隆（或更新）[tpcds-kit](https://github.com/databricks/tpcds-kit) 仓库
+4. 使用 GCC 编译原生 `dsdgen` 二进制文件
+5. 将所有内容打包到 `assets/` 目录
 
-#### Rust 生成器配置
+构建产物创建在 `tmp/`（git 忽略），最终资产放置在 `assets/`。
 
-在 `conf.yaml` 的 `datagen.rust:` 部分配置：
+### 资产构建故障排除
 
-```yaml
-datagen:
-  engine: "rust"
-  rust:
-    generator_threads: 8      # 数据生成线程数（默认：CPU 核心数）
-    uploader_threads: 4       # GCS 上传线程数
-    file_size_mb: 128         # 目标 Parquet 文件大小
-    temp_dir: "/tmp/tpcds-datagen"  # 本地临时目录
-    batch_size: 50000         # 每批行数（针对 Parquet row groups 优化）
-    cleanup_after_upload: true  # 上传后删除本地文件
+**spark-sql-perf JAR 构建失败（Ivy/Maven 错误）**
+
+如果看到类似 `origin location must be absolute` 或其他依赖解析失败的错误，请清除缓存：
+
+```bash
+# 清除 Ivy、SBT 和 Maven 缓存
+rm -rf ~/.ivy2/cache ~/.sbt/boot ~/.sbt/1.0/staging ~/.m2/repository
+
+# 清除 spark-sql-perf 构建产物
+rm -rf tmp/spark-sql-perf/target tmp/spark-sql-perf/project/target
+
+# 重新运行构建
+make build-assets
 ```
 
-#### 性能建议
+**tpcds-kit 构建失败（GCC 错误）**
 
-- **Scale factor 1-10**: 单机，4-8 generator threads
-- **Scale factor 100-1000**: 使用 16+ generator threads，8+ uploader threads
-- **网络瓶颈**: 如果上传是瓶颈，增加 `uploader_threads`
-- **CPU 瓶颈**: `generator_threads` 最多设为 CPU 核心数的 2 倍
-- **磁盘空间**: 确保 `temp_dir` 有足够空间存放约 10% 的总数据量
+构建脚本已包含 GCC 14+ 严格模式的解决方案。如果仍然遇到问题：
+
+```bash
+# 确保安装了构建工具
+sudo apt-get install gcc make
+
+# 对于持续性问题，尝试使用较旧的 GCC 版本
+sudo apt-get install gcc-11
+export CC=gcc-11
+make build-assets
+```
+
+**构建成功但只创建了一个资产**
+
+即使一个组件失败，脚本也会继续构建另一个。检查构建摘要输出中的具体错误信息，并应用上述相应的修复方法。
 
 ## 项目结构
 
@@ -343,19 +341,14 @@ dataproc-tpcds/
 ├── Makefile                  # 所有 make 目标
 ├── lib/
 │   ├── cluster_manager.py    # Dataproc 集群创建/删除
-│   ├── data_generator.py     # TPC-DS 数据生成逻辑（引擎调度器）
+│   ├── data_generator.py     # TPC-DS 数据生成（使用 spark-sql-perf）
 │   ├── query_runner.py       # Spark SQL 作业提交
 │   └── bq_reporter.py        # 指标收集和 BigQuery 上报
-├── datagen_spark/            # Spark 数据生成器
-│   └── tpcds_datagen.py      # PySpark TPC-DS 数据生成脚本
-├── datagen/                  # 高性能 Rust 数据生成器
-│   ├── Cargo.toml            # Rust 依赖
-│   └── src/
-│       ├── main.rs           # CLI 入口点
-│       ├── config.rs         # 配置解析
-│       ├── generator/        # 多线程数据生成
-│       ├── schema/           # TPC-DS 表 schema（24 个表）
-│       └── uploader.rs       # 并行 GCS 上传
+├── scripts/
+│   └── build_assets.sh       # 一次性资产构建脚本
+├── assets/                   # 预构建数据生成资产
+│   ├── spark-sql-perf-assembly-*.jar  # spark-sql-perf fat JAR
+│   └── tpcds-kit-*.tar.gz    # 原生 dsdgen 二进制文件
 ├── sql/                      # TPC-DS 标准查询（q1.sql - q99.sql）
 ├── jar/                      # 预编译 JAR（可选）
 └── tests/                    # 单元测试和集成测试
@@ -505,6 +498,30 @@ pytest tests/ --cov=lib --cov-report=html
 
 ## 架构说明
 
+### GCS 存储桶结构
+
+本工具使用**单个 GCS 存储桶**，通过子文件夹组织所有数据和资源：
+
+```
+gs://{staging_bucket}/
+├── lib/                              # 数据生成资源（自动上传）
+│   ├── spark-sql-perf-assembly-*.jar   # spark-sql-perf fat JAR
+│   └── tpcds-kit-*.tar.gz              # 原生 dsdgen 二进制文件（分发到各 worker）
+├── spark-events/                     # Spark 事件日志（供 History Server 使用）
+├── scripts/                          # 查询执行脚本（自动生成）
+└── tpcds-data/{scale}/              # 生成的 TPC-DS 数据
+    ├── _SUCCESS                       # 数据生成完成标记
+    ├── store_sales/                   # 24 个 TPC-DS 表（Parquet/ORC 格式）
+    ├── catalog_sales/
+    ├── web_sales/
+    ├── date_dim/
+    └── ...
+```
+
+**资源分发到 Worker 节点:** 原生 `dsdgen` 二进制文件被打包成 tarball，通过 Spark 的 `archive_uris` 功能分发到所有 Spark executor。这确保每个 worker 都能访问该二进制文件进行并行数据生成。
+
+**配置说明:** 所有路径都基于 conf.yaml 中的 `staging_bucket` 设置。`data_path` 设置允许您自定义 TPC-DS 数据的存储位置（例如，使用基于 scale factor 的子目录，如 `tpcds-data/1T` 或 `tpcds-data/10T`）。
+
 ### 无状态设计（无 Metastore）
 
 本工具故意避免 Hive Metastore 依赖：
@@ -598,9 +615,6 @@ gsutil du -s gs://your-bucket/tpcds-data/
 
 # 删除所有 TPC-DS 数据
 gsutil -m rm -r gs://your-bucket/tpcds-data/
-
-# 删除 Rust 生成器的临时文件
-rm -rf /tmp/tpcds-datagen
 ```
 
 #### 3. 删除 BigQuery 数据（可选）
@@ -624,11 +638,11 @@ bq rm -f your-project:tpcds_metrics.benchmark_history
 # 清理 Python 缓存
 make clean
 
-# 清理 Rust 构建产物
-make datagen-clean
+# 清理所有本地文件
+make clean-local
 
-# 清理所有（Python + Rust）
-rm -rf __pycache__ .pytest_cache datagen/target
+# 或手动清理
+rm -rf __pycache__ .pytest_cache tmp/
 ```
 
 ### 资源成本摘要
@@ -651,9 +665,6 @@ gsutil ls gs://your-bucket/
 
 # 检查 BigQuery 数据集
 bq ls your-project:
-
-# 检查本地磁盘使用
-du -sh /tmp/tpcds-datagen 2>/dev/null || echo "临时目录已清理"
 ```
 
 ### 自动清理

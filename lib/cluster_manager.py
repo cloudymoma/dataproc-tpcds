@@ -129,7 +129,7 @@ class ClusterManager:
 
         # Master configuration (single node)
         master_disk = DiskConfig(
-            boot_disk_type="pd-balanced",
+            boot_disk_type=hs.get("boot_disk_type", "pd-balanced"),
             boot_disk_size_gb=hs.get("boot_disk_size_gb", 128),
         )
 

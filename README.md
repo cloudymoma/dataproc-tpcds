@@ -1,5 +1,3 @@
-[![Rust Build](https://github.com/cloudymoma/dataproc-tpcds/actions/workflows/rust.yml/badge.svg)](https://github.com/cloudymoma/dataproc-tpcds/actions/workflows/rust.yml)
-
 English | [简体中文](README_cn.md)
 
 # GCP Dataproc TPC-DS Auto-Benchmark Tool
@@ -21,8 +19,7 @@ This guide walks you through the complete benchmark process from setup to cleanu
 
 1. **Google Cloud SDK** installed and configured (`gcloud` CLI)
 2. **Python 3.8+** with pip
-3. **Rust 1.70+** (optional, only required for Rust data generator engine) - install via [rustup](https://rustup.rs/)
-4. **GCP Project** with these APIs enabled:
+3. **GCP Project** with these APIs enabled:
    - Compute Engine API
    - Dataproc API
    - Cloud Storage API
@@ -70,19 +67,12 @@ benchmark:
   data_path: "gs://your-bucket/tpcds-data/1T"
   data_format: "parquet"
 
-# Data Generator Engine Selection
+# Data Generation Configuration (spark-sql-perf)
 datagen:
-  engine: "spark"  # "spark" (default) or "rust"
-
-  # Spark engine settings (distributed on Dataproc cluster)
-  spark:
-    parallelism: 32
-
-  # Rust engine settings (local high-performance, requires Rust toolchain)
-  rust:
-    generator_threads: 8
-    uploader_threads: 4
-    file_size_mb: 128
+  num_partitions: 0              # Auto-calculate for ~128MB files
+  partition_tables: true         # Partition large tables
+  spark_sql_perf_version: "0.5.1"
+  tpcds_kit_version: "1.0.0"
 ```
 
 ### Step 3: Validate Configuration
@@ -96,22 +86,22 @@ make dry-run
 
 > **Important:** Data generation and benchmarking are **independent operations**. You must generate data before running benchmarks. Data only needs to be generated **once per scale factor** - you can run multiple benchmarks against the same dataset.
 
-Data generation uses the engine specified in `conf.yaml` (`datagen.engine`):
+Data is generated using [spark-sql-perf](https://github.com/databricks/spark-sql-perf) with the native `dsdgen` binary for full TPC-DS compliance (all 24 tables with correct schemas).
 
 ```bash
-# First, create the cluster (required for Spark engine)
+# First, create the cluster
 make cluster-create
 
-# Generate data using configured engine (spark or rust)
+# Generate data using spark-sql-perf on Dataproc
 make data-gen
 
-# Verify data was generated
+# Verify data was generated (checks all 24 tables)
 make data-check
 ```
 
-**Engine Selection:**
-- **`spark`** (default): Distributed generation on Dataproc cluster. No Rust dependency required. Faster for large scale factors (100GB+) due to distributed I/O. **Requires cluster to be running.**
-- **`rust`**: High-performance local generator with parallel GCS upload. Requires Rust toolchain. Can generate data without a cluster.
+**First-Time Setup:** Before generating data, you need the pre-built assets (JAR and dsdgen binary). Either:
+1. Download pre-built assets from releases
+2. Build them yourself: `make build-assets` (requires Linux with SBT, GCC, Make)
 
 **Data Reuse:** Once generated, the same dataset can be used for multiple benchmark runs. Set `skip_data_gen: true` in conf.yaml to skip data generation in subsequent runs, or simply don't run `make data-gen` again.
 
@@ -217,10 +207,10 @@ make run-auto-delete   # Run and auto-delete cluster when done
 make run-verbose       # Run with verbose logging
 
 # Testing
-make test              # Run all tests (Python)
+make test              # Run all tests
 make test-cov          # Run tests with coverage report
 make check-syntax      # Verify Python syntax
-make full-test         # Run all tests (Python + Rust)
+make full-test         # Run all tests
 
 # Cluster Operations
 make cluster-create    # Create Dataproc cluster only
@@ -229,14 +219,10 @@ make cluster-status    # Check cluster status
 make cluster-info      # Show cluster config
 
 # Data Operations
-make data-gen          # Generate TPC-DS data (uses engine from config)
-make data-check        # Check if data exists
+make data-gen          # Generate TPC-DS data using spark-sql-perf
+make data-check        # Check data existence and completeness
 make data-tables       # List available tables
-
-# Rust Data Generator (Development)
-make datagen-build     # Build Rust data generator (release)
-make datagen-test      # Run Rust datagen tests
-make datagen-clean     # Clean Rust build artifacts
+make build-assets      # Build spark-sql-perf assets (one-time setup)
 
 # BigQuery
 make bq-setup          # Create BQ dataset/table
@@ -249,89 +235,101 @@ make list-queries      # List available SQL queries
 make show-query QUERY=q1  # Show specific query
 ```
 
-## Data Generation Engines
+## Data Generation
 
-This tool supports two data generation engines. Choose based on your needs:
+This tool uses [spark-sql-perf](https://github.com/databricks/spark-sql-perf) from Databricks for TPC-DS data generation. This approach provides:
 
-### Spark Engine (Default)
+- **Full TPC-DS compliance**: All 24 tables with correct schemas
+- **Native dsdgen binary**: Uses the official TPC-DS data generator
+- **Distributed generation**: Runs on Dataproc cluster for scalability
+- **Optimized partitioning**: Auto-calculated for ~128MB Parquet files
 
-Distributed generation running on the Dataproc cluster. Recommended for:
-- Large scale factors (100GB+) where distributed I/O provides significant speedup
-- Users without Rust toolchain installed
-- Environments where local disk space is limited
+### Configuration
 
-Configuration in `conf.yaml`:
 ```yaml
 datagen:
-  engine: "spark"
-  spark:
-    parallelism: 32           # Number of Spark partitions (0 = auto)
-    partitions_per_table: 0   # Partitions per table (0 = auto based on scale)
+  num_partitions: 0              # Auto-calculate (scale_factor * 8)
+  partition_tables: true         # Partition large fact tables
+  cluster_by_partition_columns: true
+  spark_sql_perf_version: "0.5.1"
+  tpcds_kit_version: "1.0.0"
 ```
 
-### Rust Engine (High-Performance)
+### Partition Calculation
 
-Local high-performance generator with parallel GCS upload. Uses a dual-threadpool architecture:
-1. **Generator threads**: Generate Parquet files for all 24 TPC-DS tables in parallel
-2. **Uploader threads**: Upload completed files to GCS concurrently
+Partitions are auto-calculated to target ~128MB Parquet files:
 
-Recommended for:
-- Smaller scale factors (1-100GB) where single-machine performance is sufficient
-- Generating data without spinning up a cluster
-- Maximum control over the generation process
+| Scale Factor | Partitions | Approx File Size |
+|-------------|------------|------------------|
+| 1 GB | 100 (min) | ~10MB |
+| 100 GB | 800 | ~128MB |
+| 1000 GB (1TB) | 8000 | ~128MB |
+| 10000 GB (10TB) | 50000 (max) | ~200MB |
 
-#### Performance Optimizations
+### Pre-built Assets
 
-The Rust generator is highly optimized for maximum throughput:
+This repository includes pre-built assets for **Linux x86_64** architecture in the `assets/` directory:
 
-| Optimization | Description |
-|-------------|-------------|
-| **Static lookup tables** | 20+ pre-computed arrays for zero-allocation string generation |
-| **itoa fast formatting** | ~3x faster integer-to-string conversion than format!() |
-| **Cached distributions** | Pre-computed random distributions reused across batches |
-| **Zero-copy appends** | Direct StringBuilder append without intermediate allocations |
-| **Capacity pre-allocation** | Estimated string lengths to minimize reallocations |
-| **Optimized compression** | ZSTD level 3, GZIP level 6 tuned for speed |
-| **Batch processing** | Large upload batches (threads × 8) for throughput |
-| **LTO release build** | Link-time optimization with single codegen unit |
+- `assets/spark-sql-perf-assembly-0.5.1.jar` - Fat JAR with all dependencies
+- `assets/tpcds-kit-1.0.0.tar.gz` - Native dsdgen binary for Linux x86_64
 
-#### Building the Rust Generator
+These assets are uploaded to your Dataproc cluster during data generation. The `dsdgen` binary is a **native executable** that must match your cluster's architecture.
 
-Prerequisites: Rust 1.70+ (install via [rustup](https://rustup.rs/))
+> **Architecture Requirement:** The pre-built `dsdgen` binary is compiled for Linux x86_64, which is the default architecture for GCP Dataproc clusters. If your job cluster uses a different architecture (e.g., ARM-based instances), you must build the assets yourself to match your cluster's CPU architecture.
+
+### Building Assets (Optional)
+
+If the pre-built assets don't match your cluster architecture, or you want to use newer versions, build them yourself:
 
 ```bash
-# Build the release binary (with LTO optimization)
-make datagen-build
-
-# Run tests
-make datagen-test
+# Prerequisites: git, sbt, make, gcc, Java 11 on a Linux system
+# matching your target Dataproc cluster architecture
+make build-assets
 ```
 
-Note: When `engine: "rust"` is configured, `make data-gen` will automatically build the Rust binary if not already built.
+The `make build-assets` target:
+1. Clones (or updates) the [spark-sql-perf](https://github.com/databricks/spark-sql-perf) repository
+2. Builds the assembly JAR using SBT
+3. Clones (or updates) the [tpcds-kit](https://github.com/databricks/tpcds-kit) repository
+4. Compiles the native `dsdgen` binary using GCC
+5. Packages everything into the `assets/` directory
 
-#### Rust Generator Configuration
+Build artifacts are created in `tmp/` (git-ignored) and final assets are placed in `assets/`.
 
-Configure in `conf.yaml` under `datagen.rust:`:
+### Troubleshooting Asset Builds
 
-```yaml
-datagen:
-  engine: "rust"
-  rust:
-    generator_threads: 8      # Number of data generation threads (default: CPU count)
-    uploader_threads: 4       # Number of GCS upload threads
-    file_size_mb: 128         # Target Parquet file size
-    temp_dir: "/tmp/tpcds-datagen"  # Local temp directory
-    batch_size: 50000         # Rows per batch (optimized for Parquet row groups)
-    cleanup_after_upload: true  # Delete local files after upload
+**spark-sql-perf JAR build fails with Ivy/Maven errors**
+
+If you see errors like `origin location must be absolute` or other dependency resolution failures, clear the caches:
+
+```bash
+# Clear Ivy, SBT, and Maven caches
+rm -rf ~/.ivy2/cache ~/.sbt/boot ~/.sbt/1.0/staging ~/.m2/repository
+
+# Clear spark-sql-perf build artifacts
+rm -rf tmp/spark-sql-perf/target tmp/spark-sql-perf/project/target
+
+# Re-run the build
+make build-assets
 ```
 
-#### Performance Tips
+**tpcds-kit build fails with GCC errors**
 
-- **Scale factor 1-10**: Single machine, 4-8 generator threads
-- **Scale factor 100-1000**: Use 16+ generator threads, 8+ uploader threads
-- **Network-bound**: Increase `uploader_threads` if upload is the bottleneck
-- **CPU-bound**: Increase `generator_threads` up to 2x CPU cores
-- **Disk space**: Ensure `temp_dir` has enough space for ~10% of total data size
+The build script includes workarounds for GCC 14+ strictness. If you still encounter issues:
+
+```bash
+# Ensure build tools are installed
+sudo apt-get install gcc make
+
+# For persistent issues, try with an older GCC version
+sudo apt-get install gcc-11
+export CC=gcc-11
+make build-assets
+```
+
+**Build succeeds but only one asset is created**
+
+The script continues building even if one component fails. Check the build summary output for specific error messages and apply the relevant fix above.
 
 ## Project Structure
 
@@ -343,19 +341,14 @@ dataproc-tpcds/
 ├── Makefile                  # All make targets
 ├── lib/
 │   ├── cluster_manager.py    # Dataproc cluster create/delete
-│   ├── data_generator.py     # TPC-DS data generation logic (engine dispatcher)
+│   ├── data_generator.py     # TPC-DS data generation using spark-sql-perf
 │   ├── query_runner.py       # Spark SQL job submission
 │   └── bq_reporter.py        # Metrics collection and BigQuery reporting
-├── datagen_spark/            # Spark-based data generator
-│   └── tpcds_datagen.py      # PySpark TPC-DS data generation script
-├── datagen/                  # High-performance Rust data generator
-│   ├── Cargo.toml            # Rust dependencies
-│   └── src/
-│       ├── main.rs           # CLI entry point
-│       ├── config.rs         # Configuration parsing
-│       ├── generator/        # Multi-threaded data generation
-│       ├── schema/           # TPC-DS table schemas (24 tables)
-│       └── uploader.rs       # Parallel GCS upload
+├── scripts/
+│   └── build_assets.sh       # One-time asset build script
+├── assets/                   # Pre-built data generation assets
+│   ├── spark-sql-perf-assembly-*.jar  # spark-sql-perf fat JAR
+│   └── tpcds-kit-*.tar.gz    # Native dsdgen binary
 ├── sql/                      # TPC-DS standard queries (q1.sql - q99.sql)
 ├── jar/                      # Pre-compiled JARs (optional)
 └── tests/                    # Unit and integration tests
@@ -505,6 +498,30 @@ pytest tests/ --cov=lib --cov-report=html
 
 ## Architecture Notes
 
+### GCS Bucket Structure
+
+This tool uses a **single GCS bucket** with organized subfolders for all data and assets:
+
+```
+gs://{staging_bucket}/
+├── lib/                              # Data generation assets (uploaded automatically)
+│   ├── spark-sql-perf-assembly-*.jar   # spark-sql-perf fat JAR
+│   └── tpcds-kit-*.tar.gz              # Native dsdgen binary (distributed to workers)
+├── spark-events/                     # Spark event logs (for History Server)
+├── scripts/                          # Query execution scripts (auto-generated)
+└── tpcds-data/{scale}/              # Generated TPC-DS data
+    ├── _SUCCESS                       # Data generation completion marker
+    ├── store_sales/                   # 24 TPC-DS tables in Parquet/ORC format
+    ├── catalog_sales/
+    ├── web_sales/
+    ├── date_dim/
+    └── ...
+```
+
+**Asset Distribution to Workers:** The native `dsdgen` binary is packaged in a tarball and distributed to all Spark executors using Spark's `archive_uris` feature. This ensures each worker has access to the binary for parallel data generation.
+
+**Configuration:** All paths are derived from the `staging_bucket` setting in conf.yaml. The `data_path` setting allows you to customize where TPC-DS data is stored (e.g., to use scale-factor-specific subdirectories like `tpcds-data/1T` or `tpcds-data/10T`).
+
 ### Stateless Design (No Metastore)
 
 This tool intentionally avoids Hive Metastore dependencies:
@@ -598,9 +615,6 @@ gsutil du -s gs://your-bucket/tpcds-data/
 
 # Delete all TPC-DS data
 gsutil -m rm -r gs://your-bucket/tpcds-data/
-
-# Delete temp files from Rust generator
-rm -rf /tmp/tpcds-datagen
 ```
 
 #### 3. Delete BigQuery Data (Optional)
@@ -624,11 +638,11 @@ bq rm -f your-project:tpcds_metrics.benchmark_history
 # Clean Python cache
 make clean
 
-# Clean Rust build artifacts
-make datagen-clean
+# Clean all local files
+make clean-local
 
-# Clean all (Python + Rust)
-rm -rf __pycache__ .pytest_cache datagen/target
+# Or manually
+rm -rf __pycache__ .pytest_cache tmp/
 ```
 
 ### Resource Cost Summary
@@ -651,9 +665,6 @@ gsutil ls gs://your-bucket/
 
 # Check BigQuery datasets
 bq ls your-project:
-
-# Check local disk usage
-du -sh /tmp/tpcds-datagen 2>/dev/null || echo "Temp dir already cleaned"
 ```
 
 ### Automated Cleanup

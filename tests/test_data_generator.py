@@ -92,35 +92,6 @@ class TestDataGenerator:
             assert result["status"] == "SKIPPED"
             assert "exists" in result["message"].lower()
 
-    def test_create_datagen_script(self, sample_config):
-        """Test data generation script creation."""
-        with patch("lib.data_generator.dataproc_v1.JobControllerClient"), \
-             patch("lib.data_generator.storage.Client"):
-            generator = DataGenerator(sample_config)
-            script = generator._create_datagen_script()
-
-            assert "SparkSession" in script
-            assert "parquet" in script
-            assert "100" in script  # scale factor
-
-    def test_upload_script(self, sample_config):
-        """Test script upload to GCS."""
-        with patch("lib.data_generator.dataproc_v1.JobControllerClient"), \
-             patch("lib.data_generator.storage.Client") as mock_storage:
-            mock_client = MagicMock()
-            mock_storage.return_value = mock_client
-
-            mock_bucket = MagicMock()
-            mock_client.bucket.return_value = mock_bucket
-            mock_blob = MagicMock()
-            mock_bucket.blob.return_value = mock_blob
-
-            generator = DataGenerator(sample_config)
-            result = generator._upload_script("test script")
-
-            assert result.startswith("gs://")
-            mock_blob.upload_from_string.assert_called_once_with("test script")
-
     def test_list_tables(self, sample_config):
         """Test listing tables from GCS."""
         with patch("lib.data_generator.dataproc_v1.JobControllerClient"), \

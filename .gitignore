@@ -79,6 +79,13 @@ Thumbs.db
 jar/*.jar
 !jar/.gitkeep
 
+# Assets directory - track structure but not large binaries
+assets/*.jar
+assets/*.tar.gz
+assets/manifest.json
+!assets/README.md
+!assets/.gitkeep
+
 # Error and status tracking
 ERROR.md
 CLAUDE.md

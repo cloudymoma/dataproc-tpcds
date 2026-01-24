@@ -18,11 +18,9 @@ NC := \033[0m # No Color
         test test-cov test-verbose lint format \
         cluster-create cluster-delete cluster-status cluster-info \
         history-create history-delete history-status history-server-delete \
-        data-gen data-check data-tables \
+        data-gen data-check data-tables build-assets \
         bq-setup bq-query bq-schema \
         check-config check-auth validate \
-        datagen-build datagen-build-debug datagen-test datagen-test-release \
-        datagen-clean datagen-help \
         quick-start full-test status
 
 # Default target
@@ -202,18 +200,16 @@ history-server-delete: history-delete ## Alias for history-delete
 
 ##@ Data Operations (run before benchmarking, only once per scale factor)
 
-data-gen: check-config check-auth ## Generate TPC-DS data (requires cluster for spark engine)
-	@echo "Generating TPC-DS data using configured engine..."
-	@echo "Note: For spark engine, ensure cluster is running (make cluster-create)"
-	@$(PYTHON) -c "import yaml; from lib.data_generator import DataGenerator; \
+data-gen: check-config check-auth ## Generate TPC-DS data using spark-sql-perf
+	@echo "Generating TPC-DS data using spark-sql-perf..."
+	@echo "Note: Ensure cluster is running (make cluster-create)"
+	@$(PYTHON) -c "import yaml; from lib.data_generator import submit_datagen_job; \
 		config = yaml.safe_load(open('$(CONFIG)')); \
-		engine = config.get('datagen', {}).get('engine', 'spark'); \
-		print(f'Using {engine} engine for data generation'); \
-		dg = DataGenerator(config); \
-		result = dg.generate_data_auto('$(CONFIG)'); \
+		result = submit_datagen_job(config); \
+		print(); \
 		print('Result:', result)"
 
-data-check: check-config check-auth ## Check TPC-DS data existence and size
+data-check: check-config check-auth ## Check TPC-DS data existence and completeness
 	@echo "Checking TPC-DS data..."
 	@$(PYTHON) -c "import yaml; from lib.data_generator import DataGenerator; \
 		config = yaml.safe_load(open('$(CONFIG)')); \
@@ -223,11 +219,12 @@ data-check: check-config check-auth ## Check TPC-DS data existence and size
 		print('=' * 60); \
 		print('TPC-DS Data Status Report'); \
 		print('=' * 60); \
-		print(f\"Data Path:      {stats['data_path']}\"); \
-		print(f\"Scale Factor:   {stats['scale_factor']} GB\"); \
-		print(f\"Data Exists:    {'YES' if stats['exists'] else 'NO'}\"); \
-		print(f\"Total Size:     {stats['total_size_human']}\"); \
-		print(f\"Tables Found:   {stats['table_count']} / 24\"); \
+		print(f\"Data Path:        {stats['data_path']}\"); \
+		print(f\"Scale Factor:     {stats['scale_factor']} GB\"); \
+		print(f\"Data Complete:    {'YES' if stats.get('is_complete') else 'NO'}\"); \
+		print(f\"_SUCCESS Marker:  {'YES' if stats.get('has_success_marker') else 'NO'}\"); \
+		print(f\"Total Size:       {stats['total_size_human']}\"); \
+		print(f\"Tables Found:     {stats['table_count']} / 24\"); \
 		print('-' * 60); \
 		if stats['tables']: \
 			print('Table Details:'); \
@@ -237,6 +234,12 @@ data-check: check-config check-auth ## Check TPC-DS data existence and size
 			print('No tables found. Run \"make data-gen\" to generate data.'); \
 		print('=' * 60); \
 		if stats.get('error'): print(f\"Error: {stats['error']}\")"
+
+build-assets: ## Build spark-sql-perf JAR and tpcds-kit binary (one-time setup)
+	@echo "Building data generation assets..."
+	@echo "This requires: git, sbt, make, gcc on a Linux system"
+	@chmod +x scripts/build_assets.sh
+	@scripts/build_assets.sh
 
 data-tables: check-config check-auth ## List available TPC-DS tables
 	@echo "Listing TPC-DS tables..."
@@ -324,11 +327,13 @@ clean-venv: ## Remove virtual environment
 	@rm -rf $(VENV)
 	@echo "Virtual environment removed."
 
-clean-all: clean datagen-clean cluster-delete ## Clean local files and delete Dataproc cluster
+clean-all: clean cluster-delete ## Clean local files and delete Dataproc cluster
 	@rm -rf $(VENV) 2>/dev/null || true
+	@rm -rf tmp/ 2>/dev/null || true
 	@echo "$(GREEN)All local files cleaned and cluster deleted.$(NC)"
 
-clean-local: clean clean-venv datagen-clean ## Remove all local generated files (no cluster deletion)
+clean-local: clean clean-venv ## Remove all local generated files (no cluster deletion)
+	@rm -rf tmp/ 2>/dev/null || true
 	@echo "All local generated files removed."
 
 ##@ Documentation
@@ -340,41 +345,12 @@ config-example: ## Show example configuration
 	@echo "Example configuration (conf.yaml):"
 	@cat conf.yaml
 
-##@ Rust Data Generator
-
-datagen-build: ## Build Rust data generator (release mode)
-	@echo "Building Rust data generator..."
-	@cd datagen && cargo build --release
-	@echo "Build complete. Binary: datagen/target/release/tpcds-datagen"
-
-datagen-build-debug: ## Build Rust data generator (debug mode)
-	@echo "Building Rust data generator (debug)..."
-	@cd datagen && cargo build
-	@echo "Debug build complete."
-
-datagen-test: ## Run Rust data generator tests
-	@echo "Running Rust datagen tests..."
-	@cd datagen && cargo test
-
-datagen-test-release: ## Run Rust data generator tests (release mode)
-	@echo "Running Rust datagen tests (release)..."
-	@cd datagen && cargo test --release
-
-datagen-clean: ## Clean Rust datagen build artifacts
-	@echo "Cleaning Rust datagen build artifacts..."
-	@cd datagen && cargo clean
-	@rm -rf /tmp/tpcds-datagen 2>/dev/null || true
-	@echo "Rust datagen cleaned."
-
-datagen-help: ## Show Rust datagen CLI help
-	@cd datagen && cargo run --release -- --help
-
 ##@ Quick Commands
 
 quick-start: install dry-run ## Install deps and validate config (first time setup)
 	@echo "$(GREEN)Quick start complete! Run 'make run' to start the benchmark.$(NC)"
 
-full-test: check-syntax test datagen-test ## Run all tests (Python + Rust)
+full-test: check-syntax test ## Run all tests
 	@echo "$(GREEN)All tests passed!$(NC)"
 
 status: check-config cluster-status data-check ## Show current status of cluster and data

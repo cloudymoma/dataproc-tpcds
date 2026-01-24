@@ -1,7 +1,6 @@
 """TPC-DS Query Execution with Temporary Views (No Metastore)."""
 
 import logging
-import os
 import time
 import uuid
 from pathlib import Path
