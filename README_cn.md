@@ -449,17 +449,29 @@ python main.py [OPTIONS]
 |------|------|------|
 | `job_uuid` | STRING | 唯一测试 ID |
 | `batch_id` | STRING | 用于分组查询的批次 ID |
-| `run_timestamp` | TIMESTAMP | 执行时间 |
+| `run_timestamp` | TIMESTAMP | 执行时间戳（已分区） |
 | `project_id` | STRING | GCP Project ID |
-| `cluster_name` | STRING | 集群名称 |
-| `scale_factor` | INTEGER | 数据大小（GB） |
+| `cluster_name` | STRING | Dataproc 集群名称 |
+| `scale_factor` | INTEGER | TPC-DS 规模因子（GB） |
+| `spark_version` | STRING | Spark 版本 |
+| `image_version` | STRING | Dataproc 镜像版本 |
+| `worker_count` | INTEGER | Worker 节点数量 |
+| `worker_machine_type` | STRING | Worker 机器类型 |
 | `query_name` | STRING | 查询名称（如 "q1"） |
-| `status` | STRING | SUCCESS/FAILED |
-| `duration_sec` | FLOAT | 执行时间（秒） |
-| `input_bytes` | INT64 | 扫描的数据量 |
-| `shuffle_read_bytes` | INT64 | Shuffle 读取量 |
-| `shuffle_write_bytes` | INT64 | Shuffle 写入量 |
-| `error_message` | STRING | 失败时的错误详情 |
+| `iteration` | INTEGER | 迭代次数 |
+| `status` | STRING | DONE、FAILED 或 SKIPPED |
+| `duration_sec` | FLOAT | 总执行时间（秒） |
+| `input_bytes` | INT64 | 扫描的总数据量（如可用） |
+| `shuffle_read_bytes` | INT64 | Shuffle 读取字节数（如可用） |
+| `shuffle_write_bytes` | INT64 | Shuffle 写入字节数（如可用） |
+| `records_read` | INT64 | 处理的总记录数（如可用） |
+| `executor_cores` | INTEGER | Executor 核心数（来自配置） |
+| `executor_memory` | STRING | Executor 内存（来自配置） |
+| `data_format` | STRING | 数据格式（parquet/orc） |
+| `job_id` | STRING | Dataproc 作业 ID |
+| `error_message` | STRING | 失败时的错误消息 |
+
+> **注意：** `input_bytes`、`shuffle_*_bytes` 和 `records_read` 等指标从 Spark 内部指标中收集（如可用）。根据 Spark 版本和查询执行情况，这些字段可能不会对所有查询都填充。
 
 ## 分析查询
 

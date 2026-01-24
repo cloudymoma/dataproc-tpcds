@@ -448,18 +448,30 @@ The `benchmark_history` table includes:
 | Field | Type | Description |
 |-------|------|-------------|
 | `job_uuid` | STRING | Unique test ID |
-| `batch_id` | STRING | Batch ID for grouping queries |
-| `run_timestamp` | TIMESTAMP | Execution time |
+| `batch_id` | STRING | Batch ID for grouping queries in a run |
+| `run_timestamp` | TIMESTAMP | Execution timestamp (partitioned) |
 | `project_id` | STRING | GCP Project ID |
-| `cluster_name` | STRING | Cluster name |
-| `scale_factor` | INTEGER | Data size in GB |
+| `cluster_name` | STRING | Dataproc cluster name |
+| `scale_factor` | INTEGER | TPC-DS scale factor in GB |
+| `spark_version` | STRING | Spark version |
+| `image_version` | STRING | Dataproc image version |
+| `worker_count` | INTEGER | Number of worker nodes |
+| `worker_machine_type` | STRING | Worker machine type |
 | `query_name` | STRING | Query name (e.g., "q1") |
-| `status` | STRING | SUCCESS/FAILED |
-| `duration_sec` | FLOAT | Execution time in seconds |
-| `input_bytes` | INT64 | Data scanned |
-| `shuffle_read_bytes` | INT64 | Shuffle read volume |
-| `shuffle_write_bytes` | INT64 | Shuffle write volume |
-| `error_message` | STRING | Error details if failed |
+| `iteration` | INTEGER | Iteration number |
+| `status` | STRING | DONE, FAILED, or SKIPPED |
+| `duration_sec` | FLOAT | Total execution time in seconds |
+| `input_bytes` | INT64 | Total input data scanned (when available) |
+| `shuffle_read_bytes` | INT64 | Shuffle read bytes (when available) |
+| `shuffle_write_bytes` | INT64 | Shuffle write bytes (when available) |
+| `records_read` | INT64 | Total records processed (when available) |
+| `executor_cores` | INTEGER | Executor cores (from config) |
+| `executor_memory` | STRING | Executor memory (from config) |
+| `data_format` | STRING | Data format (parquet/orc) |
+| `job_id` | STRING | Dataproc job ID |
+| `error_message` | STRING | Error message if failed |
+
+> **Note:** Metrics like `input_bytes`, `shuffle_*_bytes`, and `records_read` are collected from Spark's internal metrics when available. These may not be populated for all queries depending on Spark version and query execution.
 
 ## Analysis Queries
 

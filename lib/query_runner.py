@@ -115,7 +115,7 @@ try:
     row_count = result.count()
     query_time = time.time() - start_query_time
 
-    # Collect metrics
+    # Collect basic metrics
     metrics = {{
         "status": "SUCCESS",
         "duration_sec": query_time,
@@ -123,14 +123,83 @@ try:
         "row_count": row_count,
     }}
 
-    # Try to get Spark metrics
+    # Collect Spark SQL execution metrics
     try:
         sc = spark.sparkContext
-        status = sc.statusTracker()
-        # Get accumulator values if available
         metrics["spark_version"] = sc.version
-    except:
-        pass
+
+        # Get metrics from the last SQL execution
+        # Access the query execution metrics via internal API
+        listener = spark._jsparkSession.sharedState().cacheManager()
+
+        # Try to get metrics from StatusTracker
+        status_tracker = sc.statusTracker()
+
+        # Aggregate metrics from all completed jobs
+        total_input_bytes = 0
+        total_shuffle_read = 0
+        total_shuffle_write = 0
+        total_records = 0
+
+        # Get job IDs and their stage info
+        for job_id in status_tracker.getJobIdsForGroup():
+            job_info = status_tracker.getJobInfo(job_id)
+            if job_info:
+                for stage_id in job_info.stageIds():
+                    stage_info = status_tracker.getStageInfo(stage_id)
+                    if stage_info:
+                        # Note: These metrics might not be available via statusTracker
+                        pass
+
+        # Alternative: Get metrics from SparkContext accumulators
+        # This works better for completed stages
+        try:
+            # Access Spark's internal metrics via listener
+            from pyspark import SparkContext
+            from py4j.java_gateway import java_import
+
+            jvm = sc._jvm
+            java_import(jvm, "org.apache.spark.sql.execution.ui.SQLAppStatusStore")
+
+            # Get SQL metrics from the Spark UI store
+            sql_store = spark._jsparkSession.sharedState().statusStore()
+            executions = sql_store.executionsList()
+
+            if executions and len(executions) > 0:
+                # Get the most recent execution
+                last_exec = executions[-1] if hasattr(executions, '__getitem__') else None
+                if last_exec:
+                    exec_id = last_exec.executionId()
+                    exec_metrics = sql_store.executionMetrics(exec_id)
+
+                    for metric in exec_metrics:
+                        name = metric.name()
+                        value = metric.metricValue()
+                        if "scan" in name.lower() or "input" in name.lower():
+                            if "bytes" in name.lower():
+                                total_input_bytes += int(value) if value.isdigit() else 0
+                            elif "rows" in name.lower():
+                                total_records += int(value) if value.isdigit() else 0
+                        elif "shuffle" in name.lower():
+                            if "read" in name.lower() and "bytes" in name.lower():
+                                total_shuffle_read += int(value) if value.isdigit() else 0
+                            elif "write" in name.lower() and "bytes" in name.lower():
+                                total_shuffle_write += int(value) if value.isdigit() else 0
+        except Exception as metric_err:
+            print(f"Could not collect detailed metrics: {{metric_err}}")
+
+        # Only add metrics if we got meaningful values
+        if total_input_bytes > 0:
+            metrics["input_bytes"] = total_input_bytes
+        if total_shuffle_read > 0:
+            metrics["shuffle_read_bytes"] = total_shuffle_read
+        if total_shuffle_write > 0:
+            metrics["shuffle_write_bytes"] = total_shuffle_write
+        if total_records > 0:
+            metrics["records_read"] = total_records
+
+    except Exception as e:
+        print(f"Warning: Could not collect Spark metrics: {{e}}")
 
     print(f"Query completed in {{query_time:.2f}} seconds")
     print(f"Result row count: {{row_count}}")
@@ -270,7 +339,11 @@ spark.stop()
             }
 
     def _parse_job_metrics(self, job_details) -> Dict[str, Any]:
-        """Parse metrics from job details."""
+        """Parse metrics from job details and driver output.
+
+        Extracts the METRICS_JSON line from the driver output to get
+        detailed Spark execution metrics.
+        """
         metrics = {}
 
         try:
@@ -283,6 +356,41 @@ spark.stop()
             if hasattr(job_details, "driver_output_resource_uri"):
                 driver_uri = job_details.driver_output_resource_uri
                 metrics["driver_output_uri"] = driver_uri
+
+                # Try to read driver output and extract METRICS_JSON
+                try:
+                    import json
+                    import re
+
+                    # Parse GCS URI
+                    if driver_uri.startswith("gs://"):
+                        path = driver_uri.replace("gs://", "")
+                        bucket_name = path.split("/")[0]
+                        blob_path = "/".join(path.split("/")[1:])
+
+                        bucket = self.storage_client.bucket(bucket_name)
+                        blob = bucket.blob(blob_path)
+
+                        if blob.exists():
+                            # Download and parse the driver output
+                            output = blob.download_as_text()
+
+                            # Find METRICS_JSON line
+                            for line in output.split("\n"):
+                                if line.startswith("METRICS_JSON:"):
+                                    json_str = line[len("METRICS_JSON:"):]
+                                    parsed_metrics = json.loads(json_str)
+
+                                    # Copy relevant metrics
+                                    for key in ["spark_version", "row_count", "view_registration_sec",
+                                                 "input_bytes", "shuffle_read_bytes", "shuffle_write_bytes",
+                                                 "records_read", "compile_time_sec"]:
+                                        if key in parsed_metrics:
+                                            metrics[key] = parsed_metrics[key]
+                                    break
+
+                except Exception as parse_err:
+                    logger.debug(f"Could not parse driver output: {parse_err}")
 
         except Exception as e:
             logger.debug(f"Error parsing job metrics: {e}")
