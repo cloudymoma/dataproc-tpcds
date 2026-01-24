@@ -561,10 +561,28 @@ This ensures the benchmark measures pure Spark SQL performance without metastore
 
 ## Best Practices
 
+### Executor Sizing
+
+Optimal executor configuration varies by machine type. Use 4-5 cores per executor for best I/O parallelism, and keep memory under 32GB to enable JVM compressed OOPs:
+
+| Machine Type | Cores | Memory | Overhead | Executors/Node |
+|--------------|-------|--------|----------|----------------|
+| n2-standard-4 | 2 | 5g | 512m | 1 |
+| n2-standard-8 | 4 | 10g | 1g | 2 |
+| n2-standard-16 | 5 | 15g | 2g | 3 |
+| n2-highmem-8 | 4 | 20g | 2g | 2 |
+| n2-highmem-16 | 5 | 30g | 3g | 3 |
+
+**Key principles:**
+- **4-5 cores per executor**: Optimal for HDFS/GCS parallel I/O throughput
+- **Memory under 32GB**: Enables JVM compressed OOPs (saves 5-15% memory)
+- **2-5 GB per core**: Memory-to-core ratio for TPC-DS workloads
+- **Reserve 20% for overhead**: OS, YARN, and system processes
+
 ### For 1TB Benchmarks
 - Use at least 4-8 worker nodes
-- Recommended: `n2-standard-8` workers
-- Enable Spark adaptive query execution
+- Recommended: `n2-standard-8` workers with local SSD
+- Enable Spark adaptive query execution (enabled by default)
 
 ### For Reproducible Results
 - Run multiple iterations (`iterations: 3`)

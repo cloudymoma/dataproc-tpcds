@@ -561,10 +561,28 @@ gs://{staging_bucket}/
 
 ## 最佳实践
 
+### Executor 配置
+
+最优 executor 配置因机器类型而异。使用 4-5 个核心以获得最佳 I/O 并行性，内存保持在 32GB 以下以启用 JVM 压缩 OOPs：
+
+| 机器类型 | 核心数 | 内存 | 开销 | 每节点 Executor 数 |
+|----------|--------|------|------|-------------------|
+| n2-standard-4 | 2 | 5g | 512m | 1 |
+| n2-standard-8 | 4 | 10g | 1g | 2 |
+| n2-standard-16 | 5 | 15g | 2g | 3 |
+| n2-highmem-8 | 4 | 20g | 2g | 2 |
+| n2-highmem-16 | 5 | 30g | 3g | 3 |
+
+**关键原则：**
+- **每 executor 4-5 个核心**：HDFS/GCS 并行 I/O 吞吐量最优
+- **内存低于 32GB**：启用 JVM 压缩 OOPs（节省 5-15% 内存）
+- **每核心 2-5 GB**：TPC-DS 工作负载的内存与核心比率
+- **预留 20% 开销**：OS、YARN 和系统进程
+
 ### 1TB 基准测试
 - 使用至少 4-8 个 worker 节点
-- 推荐：`n2-standard-8` workers
-- 启用 Spark adaptive query execution
+- 推荐：带本地 SSD 的 `n2-standard-8` workers
+- 启用 Spark adaptive query execution（默认已启用）
 
 ### 可重复结果
 - 运行多次迭代（`iterations: 3`）

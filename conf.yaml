@@ -61,10 +61,37 @@ dataproc:
   init_actions: []
 
   # Spark tuning parameters
+  # NOTE: Executor sizing is optimized for the worker machine type above.
+  # For different machine types, adjust according to this guide:
+  #
+  #   Machine Type       | Cores | Memory | Overhead | Executors/Node
+  #   -------------------|-------|--------|----------|----------------
+  #   n2-standard-4      |   2   |   5g   |   512m   |      1
+  #   n2-standard-8      |   4   |  10g   |    1g    |      2
+  #   n2-standard-16     |   5   |  15g   |    2g    |      3
+  #   n2-highmem-8       |   4   |  20g   |    2g    |      2
+  #   n2-highmem-16      |   5   |  30g   |    3g    |      3
+  #
+  # Key principles:
+  #   - Keep executor cores between 4-5 (optimal for parallel I/O)
+  #   - Keep executor memory under 32GB (enables JVM compressed OOPs)
+  #   - Reserve ~20% of node memory for OS/YARN overhead
+  #   - Memory per core ratio: 2-5 GB per core
+  #
   spark_properties:
-    # Executor settings
-    "spark.executor.memory": "6g"
-    "spark.executor.cores": "2"
+    # Executor settings (optimized for n2-standard-8: 8 vCPUs, 32GB RAM)
+    # YARN allocates ~26GB memory per node for containers
+    # With 4 cores and 11g total (10g + 1g overhead) per executor:
+    #   - Cores: 8 vCPUs / 4 = 2 executors per node
+    #   - Memory: 26GB / 11GB = 2 executors per node
+    "spark.executor.cores": "4"
+    "spark.executor.memory": "10g"
+    "spark.executor.memoryOverhead": "1g"
+    # Driver settings (sized for n2-standard-4 master: 4 vCPUs, 16GB RAM)
+    # Driver coordinates query execution and collects results
+    "spark.driver.memory": "6g"
+    "spark.driver.memoryOverhead": "1g"
+    "spark.driver.cores": "2"
     # Serialization
     "spark.serializer": "org.apache.spark.serializer.KryoSerializer"
     # Adaptive Query Execution (AQE)
