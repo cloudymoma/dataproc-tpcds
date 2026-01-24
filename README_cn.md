@@ -33,6 +33,8 @@
        bigquery.googleapis.com
    ```
 
+4. **GCS 存储桶** 名称用于存储数据和脚本（如果不存在，将自动在与集群相同的区域中创建）
+
 ### 步骤 1：安装
 
 ```bash
@@ -184,9 +186,15 @@ gcloud auth application-default login
 # 2. 编辑 conf.yaml 填入您的项目/存储桶
 vim conf.yaml
 
-# 3. 运行基准测试并自动清理
+# 3. 创建集群并生成数据（仅首次需要）
+make cluster-create
+make data-gen
+
+# 4. 运行基准测试并自动清理
 make run-auto-delete
 ```
+
+> **注意：** 数据生成（步骤 3）每个 scale factor 只需运行一次。后续基准测试运行时，跳过步骤 3，直接运行 `make run-auto-delete` 即可。
 
 ## Make 目标
 

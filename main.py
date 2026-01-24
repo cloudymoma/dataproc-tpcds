@@ -18,6 +18,8 @@ from pathlib import Path
 from typing import Any, Dict
 
 import yaml
+from google.cloud import storage
+from google.api_core.exceptions import Conflict
 
 from lib.cluster_manager import ClusterManager
 from lib.data_generator import DataGenerator
@@ -91,6 +93,60 @@ def setup_credentials(config: Dict[str, Any]):
         else:
             logger.warning(f"Service account key not found: {key_path}")
             logger.info("Falling back to default credentials")
+
+
+def ensure_bucket_exists(config: Dict[str, Any]) -> bool:
+    """Ensure the GCS staging bucket exists, creating it if necessary.
+
+    Creates the bucket in the same region as the Dataproc cluster to ensure
+    data locality and avoid cross-region transfer costs.
+
+    Args:
+        config: Configuration dictionary
+
+    Returns:
+        True if bucket exists or was created successfully
+    """
+    bucket_name = config["gcp"]["staging_bucket"].replace("gs://", "")
+    region = config["gcp"]["region"]
+    project_id = config["gcp"]["project_id"]
+
+    try:
+        client = storage.Client(project=project_id)
+        bucket = client.bucket(bucket_name)
+
+        if bucket.exists():
+            # Verify bucket location matches configured region
+            bucket.reload()
+            bucket_location = bucket.location.lower()
+            config_region = region.lower()
+
+            # Check if locations are compatible (same region or multi-region containing the region)
+            if bucket_location != config_region and not config_region.startswith(bucket_location):
+                logger.warning(
+                    f"Bucket '{bucket_name}' exists in '{bucket_location}' but cluster region is '{region}'. "
+                    f"This may cause cross-region data transfer costs."
+                )
+            else:
+                logger.info(f"Using existing bucket: gs://{bucket_name} (location: {bucket_location})")
+            return True
+
+        # Create bucket in the same region as the cluster
+        logger.info(f"Creating bucket gs://{bucket_name} in region {region}...")
+        bucket = client.bucket(bucket_name)
+        bucket.storage_class = "STANDARD"
+        new_bucket = client.create_bucket(bucket, location=region)
+        logger.info(f"Created bucket: gs://{new_bucket.name} (location: {new_bucket.location})")
+        return True
+
+    except Conflict:
+        # Bucket already exists (race condition or owned by another project)
+        logger.info(f"Bucket gs://{bucket_name} already exists")
+        return True
+
+    except Exception as e:
+        logger.error(f"Failed to ensure bucket exists: {e}")
+        return False
 
 
 def prompt_delete_cluster() -> bool:
@@ -313,6 +369,11 @@ For more information, see README.md
 
         # Setup credentials
         setup_credentials(config)
+
+        # Ensure GCS bucket exists (creates in same region as cluster if needed)
+        if not ensure_bucket_exists(config):
+            logger.error("Failed to ensure GCS bucket exists. Please check permissions.")
+            return 1
 
         # Dry run mode
         if args.dry_run:

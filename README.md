@@ -33,6 +33,8 @@ This guide walks you through the complete benchmark process from setup to cleanu
        bigquery.googleapis.com
    ```
 
+4. **GCS Bucket** name for storing data and scripts (will be created automatically in the same region as your cluster if it doesn't exist)
+
 ### Step 1: Installation
 
 ```bash
@@ -184,9 +186,15 @@ gcloud auth application-default login
 # 2. Edit conf.yaml with your project/bucket
 vim conf.yaml
 
-# 3. Run benchmark with auto-cleanup
+# 3. Create cluster and generate data (first time only)
+make cluster-create
+make data-gen
+
+# 4. Run benchmark with auto-cleanup
 make run-auto-delete
 ```
+
+> **Note:** Data generation (step 3) only needs to run once per scale factor. For subsequent benchmark runs, skip step 3 and run `make run-auto-delete` directly.
 
 ## Make Targets
 
