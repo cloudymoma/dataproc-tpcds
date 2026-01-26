@@ -1,0 +1,10 @@
+{
+    "spark_sql_perf_version": "0.5.1",
+    "spark_sql_perf_status": "success",
+    "tpcds_kit_version": "1.0.0",
+    "tpcds_kit_status": "success",
+    "build_date": "2026-01-24T15:54:19+08:00",
+    "spark_version": "3.x",
+    "scala_version": "2.12",
+    "platform": "linux-x86_64"
+}
