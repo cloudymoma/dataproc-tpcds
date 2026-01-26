@@ -94,10 +94,13 @@ dataproc:
     "spark.hadoop.mapreduce.outputcommitter.factory.class": "org.apache.hadoop.mapreduce.lib.output.DataprocFileOutputCommitterFactory"
     "spark.hadoop.mapreduce.fileoutputcommitter.marksuccessfuljobs": "false"
     # Event logging (for History Server integration)
+    # Optimized for minimal performance impact
     "spark.eventLog.enabled": "true"
     "spark.eventLog.dir": "gs://du-hast-mich-tpcds-bench/spark-events"
+    "spark.eventLog.compress": "true"
     "spark.eventLog.rolling.enabled": "true"
     "spark.eventLog.rolling.maxFileSize": "128m"
+    "spark.eventLog.buffer.kb": "256"
   # Dataproc cluster properties
   dataproc_properties:
     "dataproc.cluster.caching.enabled": "true"
