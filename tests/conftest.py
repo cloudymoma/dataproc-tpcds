@@ -35,7 +35,6 @@ def sample_config() -> Dict[str, Any]:
             "data_format": "parquet",
             "format_compression": "snappy",
             "data_path": "gs://test-bucket/tpcds-data/100G",
-            "skip_data_gen": False,
             "queries_to_run": "all",
             "iterations": 1,
         },

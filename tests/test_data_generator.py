@@ -39,8 +39,17 @@ class TestDataGenerator:
             mock_bucket = MagicMock()
             mock_client.bucket.return_value = mock_bucket
 
-            # Mock that blobs exist
-            mock_bucket.list_blobs.return_value = [MagicMock()]
+            # Mock _SUCCESS marker exists
+            mock_success_blob = MagicMock()
+            mock_success_blob.exists.return_value = True
+            mock_bucket.blob.return_value = mock_success_blob
+
+            # Mock all 24 tables exist
+            mock_page = MagicMock()
+            mock_page.prefixes = [f"data/{table}/" for table in TPCDS_TABLES]
+            mock_blobs = MagicMock()
+            mock_blobs.pages = [mock_page]
+            mock_bucket.list_blobs.return_value = mock_blobs
 
             generator = DataGenerator(sample_config)
             result = generator.data_exists()
@@ -56,24 +65,21 @@ class TestDataGenerator:
 
             mock_bucket = MagicMock()
             mock_client.bucket.return_value = mock_bucket
-            mock_bucket.list_blobs.return_value = []
+
+            # Mock _SUCCESS marker does not exist
+            mock_success_blob = MagicMock()
+            mock_success_blob.exists.return_value = False
+            mock_bucket.blob.return_value = mock_success_blob
+
+            # Mock no tables
+            mock_blobs = MagicMock()
+            mock_blobs.pages = []
+            mock_bucket.list_blobs.return_value = mock_blobs
 
             generator = DataGenerator(sample_config)
             result = generator.data_exists()
 
             assert result is False
-
-    def test_generate_data_skipped(self, sample_config):
-        """Test generate_data when skip_data_gen is True."""
-        sample_config["benchmark"]["skip_data_gen"] = True
-
-        with patch("lib.data_generator.dataproc_v1.JobControllerClient"), \
-             patch("lib.data_generator.storage.Client"):
-            generator = DataGenerator(sample_config)
-            result = generator.generate_data()
-
-            assert result["status"] == "SKIPPED"
-            assert "skipped" in result["message"].lower()
 
     def test_generate_data_already_exists(self, sample_config):
         """Test generate_data when data already exists."""
@@ -84,7 +90,18 @@ class TestDataGenerator:
 
             mock_bucket = MagicMock()
             mock_client.bucket.return_value = mock_bucket
-            mock_bucket.list_blobs.return_value = [MagicMock()]
+
+            # Mock _SUCCESS marker exists
+            mock_success_blob = MagicMock()
+            mock_success_blob.exists.return_value = True
+            mock_bucket.blob.return_value = mock_success_blob
+
+            # Mock all 24 tables exist
+            mock_page = MagicMock()
+            mock_page.prefixes = [f"data/{table}/" for table in TPCDS_TABLES]
+            mock_blobs = MagicMock()
+            mock_blobs.pages = [mock_page]
+            mock_bucket.list_blobs.return_value = mock_blobs
 
             generator = DataGenerator(sample_config)
             result = generator.generate_data()

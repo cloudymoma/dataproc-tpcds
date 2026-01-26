@@ -14,10 +14,12 @@ ASSETS_DIR="$PROJECT_ROOT/assets"
 # Version tracking
 SPARK_SQL_PERF_VERSION="0.5.1"
 TPCDS_KIT_VERSION="1.0.0"
+TPCDS_DATAGEN_VERSION="1.0.0"
 
 # Build status tracking
 SPARK_SQL_PERF_STATUS="not attempted"
 TPCDS_KIT_STATUS="not attempted"
+TPCDS_DATAGEN_STATUS="not attempted"
 
 # Colors for output
 GREEN='\033[0;32m'
@@ -135,6 +137,53 @@ build_spark_sql_perf() {
     return 0
 }
 
+# Build tpcds-datagen (Custom Main Class JAR)
+build_tpcds_datagen() {
+    echo ""
+    echo -e "${YELLOW}Building tpcds-datagen...${NC}"
+
+    # Check if sbt is available
+    if ! command -v sbt &> /dev/null; then
+        echo -e "${RED}Error: sbt not found. Skipping tpcds-datagen build.${NC}"
+        TPCDS_DATAGEN_STATUS="skipped (sbt not found)"
+        return 1
+    fi
+
+    # Check if spark-sql-perf JAR exists
+    if [ ! -f "$ASSETS_DIR/spark-sql-perf-assembly-${SPARK_SQL_PERF_VERSION}.jar" ]; then
+        echo -e "${RED}Error: spark-sql-perf JAR not found. Build it first.${NC}"
+        TPCDS_DATAGEN_STATUS="skipped (spark-sql-perf JAR not found)"
+        return 1
+    fi
+
+    cd "$PROJECT_ROOT/datagen-spark"
+
+    # Create lib directory and copy spark-sql-perf JAR
+    mkdir -p lib
+    cp "$ASSETS_DIR/spark-sql-perf-assembly-${SPARK_SQL_PERF_VERSION}.jar" lib/
+
+    echo "Compiling tpcds-datagen..."
+    if ! sbt clean compile package; then
+        echo -e "${RED}Error: sbt compile failed${NC}"
+        TPCDS_DATAGEN_STATUS="failed (sbt compile error)"
+        return 1
+    fi
+
+    # Find the built JAR
+    JAR_FILE=$(find target -name "tpcds-datagen_*.jar" 2>/dev/null | head -1)
+
+    if [ -z "$JAR_FILE" ]; then
+        echo -e "${RED}Error: Could not find built JAR file${NC}"
+        TPCDS_DATAGEN_STATUS="failed (JAR not found)"
+        return 1
+    fi
+
+    cp "$JAR_FILE" "$ASSETS_DIR/tpcds-datagen-${TPCDS_DATAGEN_VERSION}.jar"
+    echo -e "${GREEN}tpcds-datagen JAR built successfully.${NC}"
+    TPCDS_DATAGEN_STATUS="success"
+    return 0
+}
+
 # Build tpcds-kit (Native Binary)
 build_tpcds_kit() {
     echo ""
@@ -208,6 +257,8 @@ create_manifest() {
 {
     "spark_sql_perf_version": "${SPARK_SQL_PERF_VERSION}",
     "spark_sql_perf_status": "${SPARK_SQL_PERF_STATUS}",
+    "tpcds_datagen_version": "${TPCDS_DATAGEN_VERSION}",
+    "tpcds_datagen_status": "${TPCDS_DATAGEN_STATUS}",
     "tpcds_kit_version": "${TPCDS_KIT_VERSION}",
     "tpcds_kit_status": "${TPCDS_KIT_STATUS}",
     "build_date": "$(date -Iseconds)",
@@ -272,6 +323,14 @@ print_summary() {
         echo -e "  spark-sql-perf JAR: ${RED}$SPARK_SQL_PERF_STATUS${NC}"
     fi
 
+    # tpcds-datagen status
+    if [ "$TPCDS_DATAGEN_STATUS" = "success" ]; then
+        echo -e "  tpcds-datagen JAR:  ${GREEN}SUCCESS${NC}"
+        echo "    -> $ASSETS_DIR/tpcds-datagen-${TPCDS_DATAGEN_VERSION}.jar"
+    else
+        echo -e "  tpcds-datagen JAR:  ${RED}$TPCDS_DATAGEN_STATUS${NC}"
+    fi
+
     # tpcds-kit status
     if [ "$TPCDS_KIT_STATUS" = "success" ]; then
         echo -e "  tpcds-kit binary:   ${GREEN}SUCCESS${NC}"
@@ -292,19 +351,20 @@ print_summary() {
     # Determine exit status
     local success_count=0
     [ "$SPARK_SQL_PERF_STATUS" = "success" ] && ((success_count++))
+    [ "$TPCDS_DATAGEN_STATUS" = "success" ] && ((success_count++))
     [ "$TPCDS_KIT_STATUS" = "success" ] && ((success_count++))
 
-    if [ $success_count -eq 2 ]; then
+    if [ $success_count -eq 3 ]; then
         echo -e "${GREEN}All assets built successfully!${NC}"
         echo ""
         echo "Next steps:"
         echo "  1. Commit the assets/ directory to your repository"
         echo "  2. Or upload assets to a GCS bucket for distribution"
         return 0
-    elif [ $success_count -eq 1 ]; then
-        echo -e "${YELLOW}Partial success: 1 of 2 assets built.${NC}"
-        echo "You may still be able to use the tool with the available asset."
-        echo "Fix the errors above and re-run to build the missing asset."
+    elif [ $success_count -ge 1 ]; then
+        echo -e "${YELLOW}Partial success: $success_count of 3 assets built.${NC}"
+        echo "You may still be able to use the tool with the available assets."
+        echo "Fix the errors above and re-run to build the missing assets."
         print_troubleshooting
         return 1
     else
@@ -317,6 +377,7 @@ print_summary() {
 
 # Main execution
 build_spark_sql_perf
+build_tpcds_datagen
 build_tpcds_kit
 create_manifest
 print_summary

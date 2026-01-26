@@ -274,7 +274,6 @@ def print_dry_run_summary(config: Dict[str, Any]):
   Data Path       : {bm['data_path']}
   Queries         : {query_str}
   Iterations      : {bm.get('iterations', 1)}
-  Skip Data Gen   : {bm.get('skip_data_gen', False)}
 """)
 
     # BigQuery Reporting
@@ -369,17 +368,36 @@ def run_benchmark(config: Dict[str, Any], skip_cluster_delete: bool = False) -> 
         # Get cluster info for reporting
         cluster_info = cluster_mgr.get_cluster_info()
 
-        # === Phase 2: Data Generation ===
+        # === Phase 2: Verify Data Exists ===
         logger.info("=" * 60)
-        logger.info("Phase 2: TPC-DS Data Generation")
+        logger.info("Phase 2: Verifying TPC-DS Data")
         logger.info("=" * 60)
 
-        datagen_result = data_gen.generate_data()
-        if datagen_result["status"] == "FAILED":
-            logger.error(f"Data generation failed: {datagen_result.get('error')}")
+        data_stats = data_gen.get_data_stats()
+        if not data_stats["is_complete"]:
+            data_path = config["benchmark"]["data_path"]
+            table_count = data_stats["table_count"]
+            has_marker = data_stats["has_success_marker"]
+            logger.error("")
+            logger.error("=" * 70)
+            logger.error("ERROR: TPC-DS data not found or incomplete!")
+            logger.error("=" * 70)
+            logger.error(f"  Data path    : {data_path}")
+            logger.error(f"  Tables found : {table_count}/24")
+            logger.error(f"  _SUCCESS     : {'Yes' if has_marker else 'No'}")
+            logger.error("")
+            logger.error("Data generation is a prerequisite for benchmarking.")
+            logger.error("Please run 'make data-gen' first to generate TPC-DS data.")
+            logger.error("")
+            logger.error("Example:")
+            logger.error("  make cluster-create   # Create cluster (if not exists)")
+            logger.error("  make data-gen         # Generate TPC-DS data")
+            logger.error("  make run              # Then run benchmark")
+            logger.error("=" * 70)
             return 1
 
-        logger.info(f"Data generation: {datagen_result['status']}")
+        logger.info(f"Data verified: {data_stats['table_count']} tables, "
+                   f"{data_stats['total_size_human']}")
 
         # List available tables
         tables = data_gen.list_tables()

@@ -9,7 +9,7 @@ A lightweight, highly automated command-line tool for running TPC-DS (1TB scale)
 - **Simple**: Pure Python and Shell, no complex dependencies
 - **Stateless**: No Hive Metastore required - uses GCS + Temporary Views
 - **Observable**: Structured results stored in BigQuery for easy comparison across different machine types and Spark configurations
-- **Automated**: One command to create cluster, generate data, run queries, and report metrics
+- **Automated**: Simple commands to create cluster, run queries, and report metrics
 
 ## Step-by-Step Benchmark Guide
 
@@ -111,7 +111,9 @@ make data-check
 1. Download pre-built assets from releases
 2. Build them yourself: `make build-assets` (requires Linux with SBT, GCC, Make)
 
-**Data Reuse:** Once generated, the same dataset can be used for multiple benchmark runs. Set `skip_data_gen: true` in conf.yaml to skip data generation in subsequent runs, or simply don't run `make data-gen` again.
+**Data Reuse:** Once generated, the same dataset can be used for multiple benchmark runs. Running `make data-gen` again will automatically skip if data already exists (checks for `_SUCCESS` marker and all 24 tables). To control this behavior:
+- `overwrite: false` (default) - Skip data generation if complete data exists
+- `overwrite: true` - Force regeneration, overwriting existing data
 
 ### Step 5: Run the Benchmark
 
@@ -265,9 +267,25 @@ datagen:
   num_partitions: 0              # Auto-calculate (scale_factor * 8)
   partition_tables: true         # Partition large fact tables
   cluster_by_partition_columns: true
+  overwrite: false               # Set to true to regenerate existing data
   spark_sql_perf_version: "0.5.1"
   tpcds_kit_version: "1.0.0"
 ```
+
+### Datagen Configuration
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `num_partitions` | Number of output partitions (0 = auto-calculate) | 0 |
+| `partition_tables` | Partition large fact tables | `true` |
+| `cluster_by_partition_columns` | Cluster data by partition columns | `true` |
+| `filter_out_null_partition_values` | Filter null partition values | `false` |
+| `use_double_for_decimal` | Use double for decimal types (older Spark) | `false` |
+| `job_timeout_seconds` | Job timeout in seconds | 7200 |
+| `overwrite` | Overwrite existing data (regenerate even if data exists) | `false` |
+| `spark_sql_perf_version` | Version of spark-sql-perf JAR | `0.5.1` |
+| `tpcds_datagen_version` | Version of tpcds-datagen JAR | `1.0.0` |
+| `tpcds_kit_version` | Version of tpcds-kit tarball | `1.0.0` |
 
 ### Partition Calculation
 
@@ -359,7 +377,8 @@ dataproc-tpcds/
 │   ├── query_runner.py       # Spark SQL job submission
 │   └── bq_reporter.py        # Metrics collection and BigQuery reporting
 ├── scripts/
-│   └── build_assets.sh       # One-time asset build script
+│   ├── build_assets.sh       # One-time asset build script
+│   └── data_check.py         # Data status check script
 ├── assets/                   # Pre-built data generation assets
 │   ├── spark-sql-perf-assembly-*.jar  # spark-sql-perf fat JAR
 │   └── tpcds-kit-*.tar.gz    # Native dsdgen binary
@@ -400,7 +419,6 @@ dataproc-tpcds/
 | `data_format` | Data format (parquet/orc) | `parquet` |
 | `format_compression` | Compression codec | `snappy` |
 | `data_path` | GCS path for TPC-DS data | Required |
-| `skip_data_gen` | Skip data generation if data exists | `false` |
 | `queries_to_run` | "all" or list like [1, 2, 3] | `all` |
 | `iterations` | Number of iterations per query | 1 |
 
@@ -430,8 +448,10 @@ Options:
 ### Phase 1: Cluster Creation
 Creates a Dataproc cluster with your specified configuration. If the cluster already exists, it will be reused.
 
-### Phase 2: Data Generation
-If `skip_data_gen` is false, generates TPC-DS data at the specified scale factor using Spark. Data is stored in Parquet/ORC format on GCS.
+### Phase 2: Verify Data Exists
+Verifies that TPC-DS data exists at the configured `data_path`. The benchmark will fail immediately with a clear error message if data is missing or incomplete.
+
+**Important:** Data generation (`make data-gen`) must be run separately before the benchmark. This ensures users explicitly control when data is generated and allows reusing the same dataset across multiple benchmark runs.
 
 ### Phase 3: Query Execution
 For each TPC-DS query:
@@ -561,7 +581,7 @@ This ensures the benchmark measures pure Spark SQL performance without metastore
 ### Error Handling
 
 - Cluster creation failures are fatal (exit code 1)
-- Data generation failures are fatal
+- Missing or incomplete data is fatal (run `make data-gen` first)
 - Individual query failures are logged but don't stop the benchmark
 - Cluster cleanup prompts user even on failure
 
@@ -621,7 +641,7 @@ spark_properties:
 ### Cost Optimization
 - Use `--auto-delete` to clean up clusters automatically
 - Consider preemptible VMs for large-scale tests
-- Use `skip_data_gen: true` after initial data generation
+- Reuse generated data across multiple benchmark runs
 
 ## Troubleshooting
 

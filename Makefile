@@ -209,29 +209,7 @@ data-gen: check-config check-auth ## Generate TPC-DS data using spark-sql-perf
 
 data-check: check-config check-auth ## Check TPC-DS data existence and completeness
 	@echo "Checking TPC-DS data..."
-	@$(PYTHON) -c "import yaml; from lib.data_generator import DataGenerator; \
-		config = yaml.safe_load(open('$(CONFIG)')); \
-		dg = DataGenerator(config); \
-		stats = dg.get_data_stats(); \
-		print(); \
-		print('=' * 60); \
-		print('TPC-DS Data Status Report'); \
-		print('=' * 60); \
-		print(f\"Data Path:        {stats['data_path']}\"); \
-		print(f\"Scale Factor:     {stats['scale_factor']} GB\"); \
-		print(f\"Data Complete:    {'YES' if stats.get('is_complete') else 'NO'}\"); \
-		print(f\"_SUCCESS Marker:  {'YES' if stats.get('has_success_marker') else 'NO'}\"); \
-		print(f\"Total Size:       {stats['total_size_human']}\"); \
-		print(f\"Tables Found:     {stats['table_count']} / 24\"); \
-		print('-' * 60); \
-		if stats['tables']: \
-			print('Table Details:'); \
-			for t in stats['tables']: \
-				print(f\"  {t['name']:30} {t['size_human']:>12}\"); \
-		else: \
-			print('No tables found. Run \"make data-gen\" to generate data.'); \
-		print('=' * 60); \
-		if stats.get('error'): print(f\"Error: {stats['error']}\")"
+	@$(PYTHON) scripts/data_check.py $(CONFIG)
 
 build-assets: ## Build spark-sql-perf JAR and tpcds-kit binary (one-time setup)
 	@echo "Building data generation assets..."
