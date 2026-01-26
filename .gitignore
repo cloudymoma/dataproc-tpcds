@@ -79,12 +79,14 @@ Thumbs.db
 jar/*.jar
 !jar/.gitkeep
 
-# Assets directory - track structure but not large binaries
-assets/*.jar
-assets/*.tar.gz
-assets/manifest.json
+# Assets directory - pre-built binaries for TPC-DS data generation
+# These are tracked so users don't need to build their own
+# To rebuild: make build-assets
+!assets/
 !assets/README.md
-!assets/.gitkeep
+!assets/manifest.json
+!assets/spark-sql-perf-assembly-*.jar
+!assets/tpcds-kit-*.tar.gz
 
 # Error and status tracking
 ERROR.md
