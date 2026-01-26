@@ -569,33 +569,35 @@ All cluster and executor settings are **explicitly configured** in `conf.yaml`. 
 ```yaml
 dataproc:
   num_masters: 1          # 1 for standard, 3 for high-availability
-  num_workers: 5          # 4 for executors + 1 for driver
+  num_workers: 4          # 4 workers × 2 executors = 8 executors
+  # Master and worker use same machine type (n2-standard-8) with local SSD
+  master_machine_type: "n2-standard-8"
+  worker_machine_type: "n2-standard-8"
 ```
 
 **Executor and Driver settings:**
 ```yaml
 spark_properties:
-  # Executors (8 total, 2 per worker on workers 1-4)
+  # Executors (8 total, 2 per worker)
   "spark.executor.instances": "8"
   "spark.executor.cores": "4"
   "spark.executor.memory": "14g"
   "spark.executor.memoryOverhead": "1g"
-  # Driver (dedicated worker 5)
+  # Driver (runs on master node in client mode)
   "spark.driver.cores": "6"
   "spark.driver.memory": "24g"
   "spark.driver.memoryOverhead": "4g"
 ```
 
-**Default resource allocation (5 × n2-standard-8):**
+**Default resource allocation (1 master + 4 workers, all n2-standard-8):**
 
 | Component | Location | Cores | Memory |
 |-----------|----------|-------|--------|
+| 1 Driver | Master node | 6 | 28GB |
 | 8 Executors | Workers 1-4 (2 each) | 32 | 120GB |
-| 1 Driver | Worker 5 (dedicated) | 6 | 28GB |
-| **Total** | | 38/40 | 148/150GB |
 
 **Key principles:**
-- **Driver**: Always 1 per Spark application (runs on dedicated worker)
+- **Driver**: Runs on master node (client mode via Python API)
 - **4-5 cores per executor**: Optimal for HDFS/GCS parallel I/O throughput
 - **Memory under 32GB**: Enables JVM compressed OOPs (saves 5-15% memory)
 - **Insufficient resources**: Job submission fails with YARN allocation error

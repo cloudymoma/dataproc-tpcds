@@ -176,10 +176,12 @@ class ClusterManager:
             properties=spark_props,
         )
 
-        # Master disk configuration
+        # Master disk configuration (supports local-ssd for driver performance)
         master_disk = DiskConfig(
-            boot_disk_type=dp.get("master_boot_disk_type", "pd-balanced"),
-            boot_disk_size_gb=dp.get("master_boot_disk_size_gb", 128),
+            boot_disk_type=dp.get("master_boot_disk_type", "pd-ssd"),
+            boot_disk_size_gb=dp.get("master_boot_disk_size_gb", 500),
+            num_local_ssds=dp.get("num_master_local_ssds", 0),
+            local_ssd_interface=dp.get("master_local_ssd_interface", "NVME"),
         )
 
         # Master node configuration
@@ -191,7 +193,7 @@ class ClusterManager:
 
         master_config = InstanceGroupConfig(
             num_instances=num_masters,
-            machine_type_uri=dp.get("master_machine_type", "n2-standard-4"),
+            machine_type_uri=dp.get("master_machine_type", "n2-standard-8"),
             disk_config=master_disk,
         )
 

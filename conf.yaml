@@ -42,14 +42,16 @@ dataproc:
   max_idle: "1h"                 # Auto-delete after idle period (e.g., "30m", "1h", "2h")
   tier: "premium"                # "standard" or "premium" (premium enables Lightning Engine)
 
-  # Master node configuration
+  # Master node configuration (runs driver in client mode)
   num_masters: 1                 # 1 for standard, 3 for high-availability (HA)
-  master_machine_type: "n2-standard-4"
-  master_boot_disk_size_gb: 128
-  master_boot_disk_type: "pd-balanced"
+  master_machine_type: "n2-standard-8"
+  master_boot_disk_size_gb: 500
+  master_boot_disk_type: "pd-ssd"
+  num_master_local_ssds: 1
+  master_local_ssd_interface: "NVME"
 
-  # Worker nodes configuration
-  num_workers: 5                 # Number of worker nodes
+  # Worker nodes configuration (runs executors only)
+  num_workers: 4                 # 4 workers × 2 executors = 8 executors
   worker_machine_type: "n2-standard-8"
   worker_boot_disk_size_gb: 500
   worker_boot_disk_type: "pd-ssd"
@@ -72,7 +74,7 @@ dataproc:
     "spark.executor.cores": "4"
     "spark.executor.memory": "14g"
     "spark.executor.memoryOverhead": "1g"
-    # Driver settings (dedicated worker node: 8 cores, ~30GB YARN memory)
+    # Driver settings (runs on master node in client mode: n2-standard-8)
     "spark.driver.cores": "6"
     "spark.driver.memory": "24g"
     "spark.driver.memoryOverhead": "4g"

@@ -569,33 +569,35 @@ gs://{staging_bucket}/
 ```yaml
 dataproc:
   num_masters: 1          # 1 为标准模式，3 为高可用 (HA)
-  num_workers: 5          # 4 个用于 executor + 1 个用于 driver
+  num_workers: 4          # 4 个 worker × 2 个 executor = 8 个 executor
+  # Master 和 worker 使用相同机器类型（n2-standard-8）并配备本地 SSD
+  master_machine_type: "n2-standard-8"
+  worker_machine_type: "n2-standard-8"
 ```
 
 **Executor 和 Driver 设置：**
 ```yaml
 spark_properties:
-  # Executors（共 8 个，每个 worker 2 个，分布在 workers 1-4）
+  # Executors（共 8 个，每个 worker 2 个）
   "spark.executor.instances": "8"
   "spark.executor.cores": "4"
   "spark.executor.memory": "14g"
   "spark.executor.memoryOverhead": "1g"
-  # Driver（专用 worker 5）
+  # Driver（在 master 节点上以 client 模式运行）
   "spark.driver.cores": "6"
   "spark.driver.memory": "24g"
   "spark.driver.memoryOverhead": "4g"
 ```
 
-**默认资源分配（5 × n2-standard-8）：**
+**默认资源分配（1 个 master + 4 个 worker，全部为 n2-standard-8）：**
 
 | 组件 | 位置 | 核心数 | 内存 |
 |------|------|--------|------|
+| 1 个 Driver | Master 节点 | 6 | 28GB |
 | 8 个 Executor | Workers 1-4（每个 2 个） | 32 | 120GB |
-| 1 个 Driver | Worker 5（专用） | 6 | 28GB |
-| **总计** | | 38/40 | 148/150GB |
 
 **关键原则：**
-- **Driver**：每个 Spark 应用始终为 1（运行在专用 worker 上）
+- **Driver**：运行在 master 节点（通过 Python API 以 client 模式运行）
 - **每 executor 4-5 个核心**：HDFS/GCS 并行 I/O 吞吐量最优
 - **内存低于 32GB**：启用 JVM 压缩 OOPs（节省 5-15% 内存）
 - **资源不足**：作业提交将失败并显示 YARN 分配错误
