@@ -516,9 +516,10 @@ class DataGenerator:
 
 # Convenience function for Makefile integration
 def submit_datagen_job(config: Dict[str, Any]) -> Dict[str, Any]:
-    """Submit TPC-DS data generation job.
+    """Submit TPC-DS data generation job with automatic cluster management.
 
     This is a convenience function for calling from Makefile.
+    It will create the cluster if it doesn't exist, reuse it otherwise.
 
     Args:
         config: Full configuration dictionary from conf.yaml
@@ -526,6 +527,22 @@ def submit_datagen_job(config: Dict[str, Any]) -> Dict[str, Any]:
     Returns:
         Dictionary with generation result information
     """
+    # Import here to avoid circular dependency
+    from lib.cluster_manager import ClusterManager
+
+    cluster_mgr = ClusterManager(config)
+
+    # Check if cluster exists, create if not
+    if cluster_mgr.cluster_exists():
+        logger.info(f"Cluster '{cluster_mgr.cluster_name}' exists, reusing it")
+    else:
+        logger.info(f"Cluster '{cluster_mgr.cluster_name}' not found, creating...")
+        cluster = cluster_mgr.create_cluster(wait=True)
+        if not cluster:
+            return {"status": "FAILED", "error": "Failed to create cluster"}
+        logger.info(f"Cluster '{cluster_mgr.cluster_name}' created successfully")
+
+    # Run data generation
     generator = DataGenerator(config)
     return generator.generate_data()
 

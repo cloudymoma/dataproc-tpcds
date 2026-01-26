@@ -198,9 +198,8 @@ history-server-delete: history-delete ## Alias for history-delete
 
 ##@ Data Operations (run before benchmarking, only once per scale factor)
 
-data-gen: check-config check-auth ## Generate TPC-DS data using spark-sql-perf
+data-gen: check-config check-auth ## Generate TPC-DS data (auto-creates cluster if needed)
 	@echo "Generating TPC-DS data using spark-sql-perf..."
-	@echo "Note: Ensure cluster is running (make cluster-create)"
 	@$(PYTHON) -c "import yaml; from lib.data_generator import submit_datagen_job; \
 		config = yaml.safe_load(open('$(CONFIG)')); \
 		result = submit_datagen_job(config); \

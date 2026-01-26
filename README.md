@@ -97,15 +97,22 @@ make dry-run
 Data is generated using [spark-sql-perf](https://github.com/databricks/spark-sql-perf) with the native `dsdgen` binary for full TPC-DS compliance (all 24 tables with correct schemas).
 
 ```bash
-# First, create the cluster
-make cluster-create
-
 # Generate data using spark-sql-perf on Dataproc
+# (automatically creates cluster if needed)
 make data-gen
 
-# Verify data was generated (checks all 24 tables)
+# Verify data status
 make data-check
 ```
+
+`make data-check` reports data status with actionable guidance:
+
+| Status | Meaning | Action |
+|--------|---------|--------|
+| `NO DATA` | No tables found | Run `make data-gen` |
+| `INCOMPLETE` | Some tables missing | Regenerate with `overwrite: true` |
+| `TABLES COMPLETE, MARKER MISSING` | 24 tables but no `_SUCCESS` | Create marker or regenerate |
+| `COMPLETE` | Ready for benchmarking | Run `make run` |
 
 **Assets:** The pre-built assets (JARs and dsdgen binary) are included in the `assets/` directory and ready to use. No additional setup required.
 
@@ -194,8 +201,7 @@ gcloud auth application-default login
 # 2. Edit conf.yaml with your project/bucket
 vim conf.yaml
 
-# 3. Create cluster and generate data (first time only)
-make cluster-create
+# 3. Generate data (first time only, auto-creates cluster)
 make data-gen
 
 # 4. Run benchmark with auto-cleanup
@@ -235,10 +241,10 @@ make cluster-status    # Check cluster status
 make cluster-info      # Show cluster config
 
 # Data Operations
-make data-gen          # Generate TPC-DS data using spark-sql-perf
-make data-check        # Check data existence and completeness
+make data-gen          # Generate TPC-DS data (auto-creates cluster)
+make data-check        # Check data status with actionable guidance
 make data-tables       # List available tables
-make build-assets      # Build spark-sql-perf assets (one-time setup)
+make build-assets      # Build spark-sql-perf assets (optional)
 
 # BigQuery
 make bq-setup          # Create BQ dataset/table
