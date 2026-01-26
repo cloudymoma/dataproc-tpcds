@@ -107,9 +107,9 @@ make data-gen
 make data-check
 ```
 
-**First-Time Setup:** Before generating data, you need the pre-built assets (JAR and dsdgen binary). Either:
-1. Download pre-built assets from releases
-2. Build them yourself: `make build-assets` (requires Linux with SBT, GCC, Make)
+**Assets:** The pre-built assets (JARs and dsdgen binary) are included in the `assets/` directory and ready to use. No additional setup required.
+
+> **Optional:** If you need to rebuild assets (e.g., for a different Dataproc cluster architecture), run `make build-assets`. Note: Assets must be built for your **Dataproc cluster's architecture** (Linux x86_64 by default), not your local machine.
 
 **Data Reuse:** Once generated, the same dataset can be used for multiple benchmark runs. Running `make data-gen` again will automatically skip if data already exists (checks for `_SUCCESS` marker and all 24 tables). To control this behavior:
 - `overwrite: false` (default) - Skip data generation if complete data exists

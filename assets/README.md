@@ -1,18 +1,19 @@
 # TPC-DS Data Generation Assets
 
-This directory contains pre-built assets required for TPC-DS data generation.
+This directory contains pre-built assets required for TPC-DS data generation. These assets are **ready to use** - no additional setup required.
 
-## Required Files
+## Included Files
 
 | File | Description |
 |------|-------------|
 | `spark-sql-perf-assembly-0.5.1.jar` | Fat JAR with spark-sql-perf and all dependencies |
-| `tpcds-kit-1.0.0.tar.gz` | Native dsdgen binary for Linux |
+| `tpcds-datagen-1.0.0.jar` | Custom main class for data generation |
+| `tpcds-kit-1.0.0.tar.gz` | Native dsdgen binary for Linux x86_64 |
 | `manifest.json` | Version tracking and build metadata |
 
-## Building Assets
+## Building Assets (Optional)
 
-If assets are not present, run the build script:
+The pre-built assets target **Linux x86_64**, which is the default architecture for GCP Dataproc clusters. You only need to rebuild if your Dataproc cluster uses a different architecture (e.g., ARM-based instances).
 
 ```bash
 make build-assets
@@ -24,7 +25,9 @@ The script clones repositories and builds in `tmp/` directory (git-ignored). Fin
 
 ### Prerequisites for Building
 
-- Linux x86_64 system
+**Important:** Build on a system matching your **Dataproc cluster's architecture**, not your local machine.
+
+- Linux system matching target cluster architecture (x86_64 or ARM)
 - Git
 - SBT (Scala Build Tool)
 - GCC and make
@@ -46,14 +49,9 @@ sudo apt-get install sbt
 sudo apt-get install git make gcc
 ```
 
-## Distribution
+## Usage
 
-Once built, these assets can be:
-1. Committed to the repository (if size permits)
-2. Uploaded to a GCS bucket for distribution
-3. Shared via any file hosting service
-
-Users of this tool do NOT need to rebuild these assets.
+These assets are automatically uploaded to GCS and used by your Dataproc cluster during data generation (`make data-gen`). No manual steps required.
 
 ## Version Information
 

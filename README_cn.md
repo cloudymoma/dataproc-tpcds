@@ -107,9 +107,9 @@ make data-gen
 make data-check
 ```
 
-**首次设置：** 生成数据前，需要预构建的资产（JAR 和 dsdgen 二进制文件）。可以：
-1. 从 releases 下载预构建资产
-2. 自行构建：`make build-assets`（需要 Linux 系统和 SBT、GCC、Make）
+**资产文件：** 预构建的资产（JAR 和 dsdgen 二进制文件）已包含在 `assets/` 目录中，可直接使用，无需额外设置。
+
+> **可选：** 如需重新构建资产（例如，针对不同的 Dataproc 集群架构），请运行 `make build-assets`。注意：资产必须针对您的 **Dataproc 集群架构**（默认为 Linux x86_64）构建，而非本地机器。
 
 **数据复用：** 生成后，同一数据集可用于多次基准测试运行。再次运行 `make data-gen` 会自动跳过（如果数据已存在，检查 `_SUCCESS` 标记和全部 24 个表）。控制此行为：
 - `overwrite: false`（默认） - 如果完整数据存在则跳过数据生成
