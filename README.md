@@ -561,23 +561,44 @@ This ensures the benchmark measures pure Spark SQL performance without metastore
 
 ## Best Practices
 
-### Executor Sizing
+### Cluster and Executor Configuration
 
-Optimal executor configuration varies by machine type. Use 4-5 cores per executor for best I/O parallelism, and keep memory under 32GB to enable JVM compressed OOPs:
+All cluster and executor settings are **explicitly configured** in `conf.yaml`. No auto-calculation is performed - you are responsible for ensuring resources fit within cluster capacity.
 
-| Machine Type | Cores | Memory | Overhead | Executors/Node |
-|--------------|-------|--------|----------|----------------|
-| n2-standard-4 | 2 | 5g | 512m | 1 |
-| n2-standard-8 | 4 | 10g | 1g | 2 |
-| n2-standard-16 | 5 | 15g | 2g | 3 |
-| n2-highmem-8 | 4 | 20g | 2g | 2 |
-| n2-highmem-16 | 5 | 30g | 3g | 3 |
+**Cluster-level settings:**
+```yaml
+dataproc:
+  num_masters: 1          # 1 for standard, 3 for high-availability
+  num_workers: 5          # 4 for executors + 1 for driver
+```
+
+**Executor and Driver settings:**
+```yaml
+spark_properties:
+  # Executors (8 total, 2 per worker on workers 1-4)
+  "spark.executor.instances": "8"
+  "spark.executor.cores": "4"
+  "spark.executor.memory": "14g"
+  "spark.executor.memoryOverhead": "1g"
+  # Driver (dedicated worker 5)
+  "spark.driver.cores": "6"
+  "spark.driver.memory": "24g"
+  "spark.driver.memoryOverhead": "4g"
+```
+
+**Default resource allocation (5 × n2-standard-8):**
+
+| Component | Location | Cores | Memory |
+|-----------|----------|-------|--------|
+| 8 Executors | Workers 1-4 (2 each) | 32 | 120GB |
+| 1 Driver | Worker 5 (dedicated) | 6 | 28GB |
+| **Total** | | 38/40 | 148/150GB |
 
 **Key principles:**
+- **Driver**: Always 1 per Spark application (runs on dedicated worker)
 - **4-5 cores per executor**: Optimal for HDFS/GCS parallel I/O throughput
 - **Memory under 32GB**: Enables JVM compressed OOPs (saves 5-15% memory)
-- **2-5 GB per core**: Memory-to-core ratio for TPC-DS workloads
-- **Reserve 20% for overhead**: OS, YARN, and system processes
+- **Insufficient resources**: Job submission fails with YARN allocation error
 
 ### For 1TB Benchmarks
 - Use at least 4-8 worker nodes

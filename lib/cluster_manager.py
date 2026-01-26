@@ -183,8 +183,14 @@ class ClusterManager:
         )
 
         # Master node configuration
+        # num_masters: 1 for standard cluster, 3 for high-availability (HA)
+        num_masters = dp.get("num_masters", 1)
+        if num_masters not in (1, 3):
+            logger.warning(f"Invalid num_masters={num_masters}, must be 1 or 3. Using 1.")
+            num_masters = 1
+
         master_config = InstanceGroupConfig(
-            num_instances=1,
+            num_instances=num_masters,
             machine_type_uri=dp.get("master_machine_type", "n2-standard-4"),
             disk_config=master_disk,
         )
