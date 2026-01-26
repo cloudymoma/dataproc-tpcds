@@ -97,15 +97,22 @@ make dry-run
 数据使用 [spark-sql-perf](https://github.com/databricks/spark-sql-perf) 和原生 `dsdgen` 二进制文件生成，确保完全符合 TPC-DS 规范（所有 24 个表的正确 schema）。
 
 ```bash
-# 首先创建集群
-make cluster-create
-
 # 使用 spark-sql-perf 在 Dataproc 上生成数据
+# （如需要会自动创建集群）
 make data-gen
 
-# 验证数据是否已生成（检查全部 24 个表）
+# 验证数据状态
 make data-check
 ```
+
+`make data-check` 报告数据状态并提供操作指导：
+
+| 状态 | 含义 | 操作 |
+|------|------|------|
+| `NO DATA` | 未找到表 | 运行 `make data-gen` |
+| `INCOMPLETE` | 部分表缺失 | 设置 `overwrite: true` 后重新生成 |
+| `TABLES COMPLETE, MARKER MISSING` | 24 个表但无 `_SUCCESS` | 创建标记或重新生成 |
+| `COMPLETE` | 可进行基准测试 | 运行 `make run` |
 
 **资产文件：** 预构建的资产（JAR 和 dsdgen 二进制文件）已包含在 `assets/` 目录中，可直接使用，无需额外设置。
 
@@ -194,8 +201,7 @@ gcloud auth application-default login
 # 2. 编辑 conf.yaml 填入您的项目/存储桶
 vim conf.yaml
 
-# 3. 创建集群并生成数据（仅首次需要）
-make cluster-create
+# 3. 生成数据（仅首次，自动创建集群）
 make data-gen
 
 # 4. 运行基准测试并自动清理
@@ -235,10 +241,10 @@ make cluster-status    # 检查集群状态
 make cluster-info      # 显示集群配置
 
 # 数据操作
-make data-gen          # 使用 spark-sql-perf 生成 TPC-DS 数据
-make data-check        # 检查数据是否存在及完整性
+make data-gen          # 生成 TPC-DS 数据（自动创建集群）
+make data-check        # 检查数据状态并提供操作指导
 make data-tables       # 列出可用表
-make build-assets      # 构建 spark-sql-perf 资产（一次性设置）
+make build-assets      # 构建 spark-sql-perf 资产（可选）
 
 # BigQuery
 make bq-setup          # 创建 BQ 数据集/表
