@@ -44,6 +44,7 @@ TPCDS_TABLES = [
 
 # Default asset versions
 DEFAULT_SPARK_SQL_PERF_VERSION = "0.5.1"
+DEFAULT_TPCDS_DATAGEN_VERSION = "1.0.0"
 DEFAULT_TPCDS_KIT_VERSION = "1.0.0"
 
 
@@ -261,7 +262,8 @@ class DataGenerator:
 
         Returns:
             Dict with GCS paths to uploaded assets:
-                - jar: GCS path to spark-sql-perf JAR
+                - datagen_jar: GCS path to tpcds-datagen JAR (main class)
+                - perf_jar: GCS path to spark-sql-perf JAR (library)
                 - kit: GCS path to tpcds-kit tarball
 
         Raises:
@@ -269,8 +271,11 @@ class DataGenerator:
         """
         bucket = self.storage_client.bucket(self.staging_bucket)
 
-        jar_version = self.datagen_config.get(
+        perf_jar_version = self.datagen_config.get(
             "spark_sql_perf_version", DEFAULT_SPARK_SQL_PERF_VERSION
+        )
+        datagen_jar_version = self.datagen_config.get(
+            "tpcds_datagen_version", DEFAULT_TPCDS_DATAGEN_VERSION
         )
         kit_version = self.datagen_config.get(
             "tpcds_kit_version", DEFAULT_TPCDS_KIT_VERSION
@@ -280,9 +285,13 @@ class DataGenerator:
         assets_dir = project_root / "assets"
 
         assets = {
-            "jar": {
-                "local": assets_dir / f"spark-sql-perf-assembly-{jar_version}.jar",
-                "gcs": f"lib/spark-sql-perf-assembly-{jar_version}.jar",
+            "datagen_jar": {
+                "local": assets_dir / f"tpcds-datagen-{datagen_jar_version}.jar",
+                "gcs": f"lib/tpcds-datagen-{datagen_jar_version}.jar",
+            },
+            "perf_jar": {
+                "local": assets_dir / f"spark-sql-perf-assembly-{perf_jar_version}.jar",
+                "gcs": f"lib/spark-sql-perf-assembly-{perf_jar_version}.jar",
             },
             "kit": {
                 "local": assets_dir / f"tpcds-kit-{kit_version}.tar.gz",
@@ -299,7 +308,7 @@ class DataGenerator:
             if not local_path.exists():
                 raise FileNotFoundError(
                     f"Asset not found: {local_path}\n"
-                    f"Run 'scripts/build_assets.sh' to build required assets, "
+                    f"Run 'make build-assets' to build required assets, "
                     f"or download pre-built assets."
                 )
 
@@ -372,13 +381,8 @@ class DataGenerator:
                 - elapsed_seconds: Time taken (if completed)
                 - error: Error message (if failed)
         """
-        # Check if data generation should be skipped
-        if self.benchmark_config.get("skip_data_gen", False):
-            logger.info("Data generation skipped (skip_data_gen=true)")
-            return {"status": "SKIPPED", "message": "Data generation skipped by config"}
-
         # Check if data already exists
-        overwrite = self.benchmark_config.get("overwrite", False)
+        overwrite = self.datagen_config.get("overwrite", False)
         if not overwrite:
             is_complete, table_count = self.check_data_exists()
             if is_complete:
@@ -405,13 +409,16 @@ class DataGenerator:
         job_details = {
             "placement": {"cluster_name": self.cluster_name},
             "spark_job": {
-                # Main class from spark-sql-perf
-                "main_class": "com.databricks.spark.sql.perf.tpcds.GenTPCDSData",
-                # Fat JAR with all dependencies
-                "main_jar_file_uri": asset_paths["jar"],
+                # Custom main class with proper entry point
+                "main_class": "com.tpcds.TPCDSDataGen",
+                # Both JARs needed: our main class JAR + spark-sql-perf library JAR
+                "jar_file_uris": [
+                    asset_paths["datagen_jar"],
+                    asset_paths["perf_jar"],
+                ],
                 # Distribute native dsdgen binary to all workers
                 "archive_uris": [f"{asset_paths['kit']}#tpcds_kit"],
-                # Arguments for GenTPCDSData
+                # Arguments for TPCDSDataGen
                 "args": [
                     "--dsdgenDir", "./tpcds_kit/tools",
                     "--location", self.data_path,
@@ -424,7 +431,6 @@ class DataGenerator:
                     str(self.datagen_config.get("cluster_by_partition_columns", True)).lower(),
                     "--filterOutNullPartitionValues",
                     str(self.datagen_config.get("filter_out_null_partition_values", False)).lower(),
-                    "--tableFilter", "",
                     "--useDoubleForDecimal",
                     str(self.datagen_config.get("use_double_for_decimal", False)).lower(),
                 ],

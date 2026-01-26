@@ -86,7 +86,14 @@ jar/*.jar
 !assets/README.md
 !assets/manifest.json
 !assets/spark-sql-perf-assembly-*.jar
+!assets/tpcds-datagen-*.jar
 !assets/tpcds-kit-*.tar.gz
+
+# datagen-spark build outputs (but track source)
+datagen-spark/target/
+datagen-spark/project/target/
+datagen-spark/project/project/
+datagen-spark/lib/
 
 # Error and status tracking
 ERROR.md

@@ -9,7 +9,7 @@
 - **简单**: 纯 Python 和 Shell 实现，无复杂依赖
 - **无状态**: 无需 Hive Metastore - 使用 GCS + Temporary Views
 - **可观测**: 结构化结果存储在 BigQuery 中，便于比较不同机器类型和 Spark 配置
-- **自动化**: 一条命令完成集群创建、数据生成、查询执行和指标上报
+- **自动化**: 简单命令完成集群创建、查询执行和指标上报
 
 ## 分步基准测试指南
 
@@ -111,7 +111,9 @@ make data-check
 1. 从 releases 下载预构建资产
 2. 自行构建：`make build-assets`（需要 Linux 系统和 SBT、GCC、Make）
 
-**数据复用：** 生成后，同一数据集可用于多次基准测试运行。在 conf.yaml 中设置 `skip_data_gen: true` 以在后续运行中跳过数据生成，或者直接不再运行 `make data-gen`。
+**数据复用：** 生成后，同一数据集可用于多次基准测试运行。再次运行 `make data-gen` 会自动跳过（如果数据已存在，检查 `_SUCCESS` 标记和全部 24 个表）。控制此行为：
+- `overwrite: false`（默认） - 如果完整数据存在则跳过数据生成
+- `overwrite: true` - 强制重新生成，覆盖现有数据
 
 ### 步骤 5：运行基准测试
 
@@ -265,9 +267,25 @@ datagen:
   num_partitions: 0              # 自动计算（scale_factor * 8）
   partition_tables: true         # 分区大型事实表
   cluster_by_partition_columns: true
+  overwrite: false               # 设为 true 可重新生成已存在的数据
   spark_sql_perf_version: "0.5.1"
   tpcds_kit_version: "1.0.0"
 ```
+
+### 数据生成配置
+
+| 参数 | 描述 | 默认值 |
+|------|------|--------|
+| `num_partitions` | 输出分区数（0 = 自动计算） | 0 |
+| `partition_tables` | 分区大型事实表 | `true` |
+| `cluster_by_partition_columns` | 按分区列聚簇数据 | `true` |
+| `filter_out_null_partition_values` | 过滤空分区值 | `false` |
+| `use_double_for_decimal` | 使用 double 替代 decimal 类型（旧版 Spark） | `false` |
+| `job_timeout_seconds` | 作业超时时间（秒） | 7200 |
+| `overwrite` | 覆盖已存在的数据（即使数据存在也重新生成） | `false` |
+| `spark_sql_perf_version` | spark-sql-perf JAR 版本 | `0.5.1` |
+| `tpcds_datagen_version` | tpcds-datagen JAR 版本 | `1.0.0` |
+| `tpcds_kit_version` | tpcds-kit 压缩包版本 | `1.0.0` |
 
 ### 分区计算
 
@@ -359,7 +377,8 @@ dataproc-tpcds/
 │   ├── query_runner.py       # Spark SQL 作业提交
 │   └── bq_reporter.py        # 指标收集和 BigQuery 上报
 ├── scripts/
-│   └── build_assets.sh       # 一次性资产构建脚本
+│   ├── build_assets.sh       # 一次性资产构建脚本
+│   └── data_check.py         # 数据状态检查脚本
 ├── assets/                   # 预构建数据生成资产
 │   ├── spark-sql-perf-assembly-*.jar  # spark-sql-perf fat JAR
 │   └── tpcds-kit-*.tar.gz    # 原生 dsdgen 二进制文件
@@ -400,7 +419,6 @@ dataproc-tpcds/
 | `data_format` | 数据格式（parquet/orc） | `parquet` |
 | `format_compression` | 压缩编解码器 | `snappy` |
 | `data_path` | TPC-DS 数据的 GCS 路径 | 必需 |
-| `skip_data_gen` | 如果数据存在则跳过数据生成 | `false` |
 | `queries_to_run` | "all" 或列表如 [1, 2, 3] | `all` |
 | `iterations` | 每个查询的迭代次数 | 1 |
 
@@ -430,8 +448,10 @@ python main.py [OPTIONS]
 ### 阶段 1：集群创建
 使用您指定的配置创建 Dataproc 集群。如果集群已存在，将复用它。
 
-### 阶段 2：数据生成
-如果 `skip_data_gen` 为 false，使用 Spark 按指定的 scale factor 生成 TPC-DS 数据。数据以 Parquet/ORC 格式存储在 GCS 上。
+### 阶段 2：验证数据存在
+验证配置的 `data_path` 中是否存在 TPC-DS 数据。如果数据缺失或不完整，基准测试将立即失败并显示清晰的错误信息。
+
+**重要：** 数据生成（`make data-gen`）必须在基准测试之前单独运行。这确保用户明确控制数据生成时机，并允许在多次基准测试中复用同一数据集。
 
 ### 阶段 3：查询执行
 对于每个 TPC-DS 查询：
@@ -561,7 +581,7 @@ gs://{staging_bucket}/
 ### 错误处理
 
 - 集群创建失败是致命错误（退出码 1）
-- 数据生成失败是致命错误
+- 数据缺失或不完整是致命错误（请先运行 `make data-gen`）
 - 单个查询失败会记录日志但不会停止基准测试
 - 即使失败也会提示用户清理集群
 
@@ -621,7 +641,7 @@ spark_properties:
 ### 成本优化
 - 使用 `--auto-delete` 自动清理集群
 - 考虑使用抢占式 VM 进行大规模测试
-- 初次数据生成后使用 `skip_data_gen: true`
+- 在多次基准测试中复用已生成的数据
 
 ## 故障排除
 

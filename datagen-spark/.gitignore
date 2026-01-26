@@ -1,0 +1,17 @@
+# SBT build outputs
+target/
+project/target/
+project/project/
+
+# Dependencies copied for compilation
+lib/
+
+# IDE
+.idea/
+.bsp/
+*.iml
+.metals/
+.bloop/
+
+# OS
+.DS_Store

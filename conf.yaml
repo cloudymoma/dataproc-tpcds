@@ -112,8 +112,6 @@ benchmark:
   format_compression: "snappy"
   # GCS path for data storage
   data_path: "gs://du-hast-mich-tpcds-bench/tpcds-data/1T"
-  # Skip data generation if data already exists
-  skip_data_gen: false
   # Queries to run: "all" or list like [1, 2, 3]
   queries_to_run: "all"
   # Number of iterations per test run
@@ -140,7 +138,12 @@ datagen:
   # Asset versions (must match files in assets/ directory)
   # Run 'make build-assets' to create these files
   spark_sql_perf_version: "0.5.1"
+  tpcds_datagen_version: "1.0.0"
   tpcds_kit_version: "1.0.0"
+
+  # Overwrite existing data if it exists (default: false)
+  # When false, data generation is skipped if _SUCCESS marker and all 24 tables exist
+  overwrite: false
 
 # --- BigQuery Reporting Configuration (Optional) ---
 bigquery:
