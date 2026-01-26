@@ -1,18 +1,17 @@
 # GCP Dataproc TPC-DS Auto-Benchmark Tool Dependencies
+# Minimum versions tested for compatibility
+
+# Add PyPI as extra index if your internal mirror doesn't have all packages
+--extra-index-url https://pypi.org/simple/
 
 # Google Cloud Libraries
-google-cloud-dataproc>=5.4.0
-google-cloud-storage>=2.10.0
-google-cloud-bigquery>=3.11.0
-google-api-core>=2.11.0
+google-cloud-dataproc>=5.0.0,<6.0.0    # Dataproc v1 API
+google-cloud-storage>=2.0.0,<3.0.0     # GCS operations
+google-cloud-bigquery>=3.0.0,<4.0.0    # BigQuery reporting
+google-api-core>=2.0.0,<3.0.0          # Core API utilities
 
 # Configuration
-PyYAML>=6.0
+PyYAML>=6.0,<7.0
 
-# Testing (dev dependencies)
-pytest>=7.4.0
-pytest-cov>=4.1.0
-pytest-mock>=3.11.0
-
-# Type hints
-typing-extensions>=4.7.0
+# Type hints (Python 3.8+ compatibility)
+typing-extensions>=4.0.0,<5.0.0

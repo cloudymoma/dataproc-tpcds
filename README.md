@@ -43,11 +43,17 @@ git clone <repository-url>
 cd dataproc-tpcds
 
 # Install Python dependencies
-pip install -r requirements.txt
+make install
+
+# Or use a custom Python version/path
+make PYTHON=/usr/bin/python3.11 install
 
 # Authenticate with Google Cloud
 gcloud auth application-default login
 ```
+
+> **Note**: The `PYTHON` variable can be set to any Python 3.8+ interpreter path.
+> All pip operations automatically use `$(PYTHON) -m pip` for consistency.
 
 ### Step 2: Configuration
 
@@ -180,7 +186,7 @@ For those who want to get started quickly:
 ```bash
 # 1. Clone and install
 git clone <repository-url> && cd dataproc-tpcds
-pip install -r requirements.txt
+make install
 gcloud auth application-default login
 
 # 2. Edit conf.yaml with your project/bucket
@@ -506,14 +512,14 @@ LIMIT 10;
 Run the test suite:
 
 ```bash
-# Install test dependencies
-pip install pytest pytest-cov pytest-mock
+# Install development dependencies (includes pytest)
+make install-dev
 
 # Run all tests
-pytest tests/ -v
+make test
 
 # Run with coverage
-pytest tests/ --cov=lib --cov-report=html
+make test-cov
 ```
 
 ## Architecture Notes

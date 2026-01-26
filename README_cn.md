@@ -43,11 +43,17 @@ git clone <repository-url>
 cd dataproc-tpcds
 
 # 安装 Python 依赖
-pip install -r requirements.txt
+make install
+
+# 或使用自定义 Python 版本/路径
+make PYTHON=/usr/bin/python3.11 install
 
 # 使用 Google Cloud 进行身份验证
 gcloud auth application-default login
 ```
+
+> **注意**：`PYTHON` 变量可以设置为任何 Python 3.8+ 解释器路径。
+> 所有 pip 操作自动使用 `$(PYTHON) -m pip` 以保持一致性。
 
 ### 步骤 2：配置
 
@@ -180,7 +186,7 @@ bq rm -r -f your-project:tpcds_metrics
 ```bash
 # 1. 克隆并安装
 git clone <repository-url> && cd dataproc-tpcds
-pip install -r requirements.txt
+make install
 gcloud auth application-default login
 
 # 2. 编辑 conf.yaml 填入您的项目/存储桶
@@ -506,14 +512,14 @@ LIMIT 10;
 运行测试套件：
 
 ```bash
-# 安装测试依赖
-pip install pytest pytest-cov pytest-mock
+# 安装开发依赖（包含 pytest）
+make install-dev
 
 # 运行所有测试
-pytest tests/ -v
+make test
 
 # 运行并生成覆盖率报告
-pytest tests/ --cov=lib --cov-report=html
+make test-cov
 ```
 
 ## 架构说明

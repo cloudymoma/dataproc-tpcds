@@ -1,11 +1,10 @@
 # GCP Dataproc TPC-DS Auto-Benchmark Tool Makefile
 # Usage: make [target]
 
-# Configuration
-PYTHON := python3
-PIP := pip3
-CONFIG := conf.yaml
-VENV := .venv
+# Configuration (override with: make PYTHON=/path/to/python ...)
+PYTHON ?= python3
+CONFIG ?= conf.yaml
+VENV ?= .venv
 
 # Colors for terminal output
 GREEN := \033[0;32m
@@ -40,18 +39,17 @@ venv: ## Create Python virtual environment
 
 install: ## Install production dependencies
 	@echo "Installing dependencies..."
-	@$(PIP) install -r requirements.txt
+	@$(PYTHON) -m pip install -r requirements.txt
 	@echo "Dependencies installed successfully."
 
 install-dev: ## Install development dependencies (includes test tools)
 	@echo "Installing development dependencies..."
-	@$(PIP) install -r requirements.txt
-	@$(PIP) install pytest pytest-cov pytest-mock
+	@$(PYTHON) -m pip install -r requirements-dev.txt
 	@echo "Development dependencies installed successfully."
 
 install-venv: venv ## Install dependencies in virtual environment
 	@echo "Installing dependencies in virtual environment..."
-	@$(VENV)/bin/pip install -r requirements.txt
+	@$(VENV)/bin/python -m pip install -r requirements.txt
 	@echo "Dependencies installed in virtual environment."
 
 ##@ Running Benchmarks

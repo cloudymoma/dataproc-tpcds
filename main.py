@@ -149,6 +149,156 @@ def ensure_bucket_exists(config: Dict[str, Any]) -> bool:
         return False
 
 
+def print_dry_run_summary(config: Dict[str, Any]):
+    """Print detailed configuration summary for dry-run mode."""
+    # ANSI color codes
+    CYAN = "\033[96m"
+    GREEN = "\033[92m"
+    YELLOW = "\033[93m"
+    BLUE = "\033[94m"
+    MAGENTA = "\033[95m"
+    BOLD = "\033[1m"
+    RESET = "\033[0m"
+
+    gcp = config["gcp"]
+    dp = config["dataproc"]
+    hs = config.get("history_server", {})
+    bm = config["benchmark"]
+    bq = config.get("bigquery", {})
+    spark_props = dp.get("spark_properties", {})
+
+    # Calculate resources
+    num_workers = dp.get("num_workers", 4)
+    num_executors = int(spark_props.get("spark.executor.instances", 8))
+    exec_cores = int(spark_props.get("spark.executor.cores", 4))
+    exec_mem = spark_props.get("spark.executor.memory", "10g")
+    exec_overhead = spark_props.get("spark.executor.memoryOverhead", "1g")
+    driver_cores = int(spark_props.get("spark.driver.cores", 4))
+    driver_mem = spark_props.get("spark.driver.memory", "8g")
+    driver_overhead = spark_props.get("spark.driver.memoryOverhead", "1g")
+
+    print(f"""
+{CYAN}{BOLD}╔══════════════════════════════════════════════════════════════════════════════╗
+║                    TPC-DS BENCHMARK CONFIGURATION SUMMARY                    ║
+╚══════════════════════════════════════════════════════════════════════════════╝{RESET}
+
+{GREEN}{BOLD}┌─────────────────────────────────────────────────────────────────────────────┐
+│  GCP PROJECT                                                                 │
+└─────────────────────────────────────────────────────────────────────────────┘{RESET}
+  Project ID      : {BOLD}{gcp['project_id']}{RESET}
+  Region          : {gcp['region']}
+  Zone            : {gcp.get('zone', gcp['region'] + '-a')}
+  Staging Bucket  : {gcp['staging_bucket']}
+""")
+
+    # History Server
+    if hs.get("enable", False):
+        print(f"""{YELLOW}{BOLD}┌─────────────────────────────────────────────────────────────────────────────┐
+│  SPARK HISTORY SERVER                                                        │
+└─────────────────────────────────────────────────────────────────────────────┘{RESET}
+  Cluster Name    : {hs.get('cluster_name', 'tpcds-history-server')}
+  Machine Type    : {hs.get('machine_type', 'n2-standard-4')}
+  Boot Disk       : {hs.get('boot_disk_size_gb', 128)} GB ({hs.get('boot_disk_type', 'pd-balanced')})
+  Log Directory   : {hs.get('log_dir', gcp['staging_bucket'] + '/spark-events')}
+  Status          : {GREEN}ENABLED{RESET}
+""")
+    else:
+        print(f"""{YELLOW}{BOLD}┌─────────────────────────────────────────────────────────────────────────────┐
+│  SPARK HISTORY SERVER                                                        │
+└─────────────────────────────────────────────────────────────────────────────┘{RESET}
+  Status          : {YELLOW}DISABLED{RESET}
+""")
+
+    # Job Cluster
+    print(f"""{BLUE}{BOLD}┌─────────────────────────────────────────────────────────────────────────────┐
+│  JOB CLUSTER                                                                 │
+└─────────────────────────────────────────────────────────────────────────────┘{RESET}
+  Cluster Name    : {BOLD}{dp['cluster_name']}{RESET}
+  Image Version   : {dp.get('image_version', '2.3-debian12')}
+  Tier            : {dp.get('tier', 'standard')}
+  Max Idle        : {dp.get('max_idle', '1h')}
+
+  {BOLD}Master Node:{RESET}
+    Count         : {dp.get('num_masters', 1)}
+    Machine Type  : {dp.get('master_machine_type', 'n2-standard-8')}
+    Boot Disk     : {dp.get('master_boot_disk_size_gb', 500)} GB ({dp.get('master_boot_disk_type', 'pd-ssd')})
+    Local SSDs    : {dp.get('num_master_local_ssds', 0)} x NVME
+
+  {BOLD}Worker Nodes:{RESET}
+    Count         : {num_workers}
+    Machine Type  : {dp.get('worker_machine_type', 'n2-standard-8')}
+    Boot Disk     : {dp.get('worker_boot_disk_size_gb', 500)} GB ({dp.get('worker_boot_disk_type', 'pd-ssd')})
+    Local SSDs    : {dp.get('num_worker_local_ssds', 1)} x NVME
+
+  {BOLD}Event Logging:{RESET}
+    Enabled       : {spark_props.get('spark.eventLog.enabled', 'true')}
+    Directory     : {spark_props.get('spark.eventLog.dir', 'N/A')}
+    Compression   : {spark_props.get('spark.eventLog.compress', 'false')}
+""")
+
+    # Spark Resources
+    total_exec_cores = num_executors * exec_cores
+    print(f"""{MAGENTA}{BOLD}┌─────────────────────────────────────────────────────────────────────────────┐
+│  SPARK RESOURCES                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘{RESET}
+  {BOLD}Driver (runs on Master):{RESET}
+    Cores         : {driver_cores}
+    Memory        : {driver_mem} + {driver_overhead} overhead
+
+  {BOLD}Executors (run on Workers):{RESET}
+    Count         : {num_executors}
+    Cores/Exec    : {exec_cores}
+    Memory/Exec   : {exec_mem} + {exec_overhead} overhead
+    Total Cores   : {total_exec_cores}
+
+  {BOLD}Resource Layout:{RESET}
+    ┌─────────────────────────────────────────────────────────────────┐
+    │  Master: Driver ({driver_cores} cores, {driver_mem}+{driver_overhead})                       │
+    ├─────────────────────────────────────────────────────────────────┤
+    │  Worker 1-{num_workers}: {num_executors} Executors ({exec_cores} cores, {exec_mem}+{exec_overhead} each)        │
+    └─────────────────────────────────────────────────────────────────┘
+""")
+
+    # Benchmark Settings
+    queries = bm.get("queries_to_run", "all")
+    if queries == "all":
+        query_str = "All 99 TPC-DS queries"
+    else:
+        query_str = str(queries)
+
+    print(f"""{GREEN}{BOLD}┌─────────────────────────────────────────────────────────────────────────────┐
+│  BENCHMARK SETTINGS                                                          │
+└─────────────────────────────────────────────────────────────────────────────┘{RESET}
+  Scale Factor    : {BOLD}{bm['scale_factor']} GB{RESET} ({bm['scale_factor'] / 1000:.1f} TB)
+  Data Format     : {bm.get('data_format', 'parquet')} ({bm.get('format_compression', 'snappy')})
+  Data Path       : {bm['data_path']}
+  Queries         : {query_str}
+  Iterations      : {bm.get('iterations', 1)}
+  Skip Data Gen   : {bm.get('skip_data_gen', False)}
+""")
+
+    # BigQuery Reporting
+    if bq.get("enable", True):
+        print(f"""{CYAN}{BOLD}┌─────────────────────────────────────────────────────────────────────────────┐
+│  BIGQUERY REPORTING                                                          │
+└─────────────────────────────────────────────────────────────────────────────┘{RESET}
+  Dataset         : {bq.get('dataset', 'tpcds_metrics')}
+  Table           : {bq.get('table', 'benchmark_history')}
+  Status          : {GREEN}ENABLED{RESET}
+""")
+    else:
+        print(f"""{CYAN}{BOLD}┌─────────────────────────────────────────────────────────────────────────────┐
+│  BIGQUERY REPORTING                                                          │
+└─────────────────────────────────────────────────────────────────────────────┘{RESET}
+  Status          : {YELLOW}DISABLED{RESET}
+""")
+
+    print(f"""{GREEN}{BOLD}╔══════════════════════════════════════════════════════════════════════════════╗
+║  ✓ Configuration validated successfully                                      ║
+╚══════════════════════════════════════════════════════════════════════════════╝{RESET}
+""")
+
+
 def prompt_delete_cluster() -> bool:
     """Ask user whether to delete the cluster.
 
@@ -377,15 +527,7 @@ For more information, see README.md
 
         # Dry run mode
         if args.dry_run:
-            logger.info("=== DRY RUN MODE ===")
-            logger.info("Configuration validated successfully")
-            logger.info(f"  Project: {config['gcp']['project_id']}")
-            logger.info(f"  Region: {config['gcp']['region']}")
-            logger.info(f"  Cluster: {config['dataproc']['cluster_name']}")
-            logger.info(f"  Workers: {config['dataproc']['num_workers']} x {config['dataproc']['worker_machine_type']}")
-            logger.info(f"  Scale Factor: {config['benchmark']['scale_factor']} GB")
-            logger.info(f"  Data Path: {config['benchmark']['data_path']}")
-            logger.info(f"  BigQuery: {'enabled' if config.get('bigquery', {}).get('enable', True) else 'disabled'}")
+            print_dry_run_summary(config)
             return 0
 
         # Run benchmark
