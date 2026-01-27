@@ -2,7 +2,11 @@ English | [简体中文](README_cn.md)
 
 # GCP Dataproc TPC-DS Auto-Benchmark Tool
 
-A lightweight, highly automated command-line tool for running TPC-DS (1TB scale) performance benchmarks on Google Cloud Dataproc with a single configuration file.
+A lightweight, highly automated command-line tool for running TPC-DS performance benchmarks on Google Cloud Dataproc with a single configuration file. Supports configurable scale factors from 1GB to 100TB (default: 1TB).
+
+## Architecture
+
+![Architecture Diagram](arch.svg)
 
 ## Features
 
