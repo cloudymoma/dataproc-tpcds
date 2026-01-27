@@ -2,7 +2,11 @@
 
 # GCP Dataproc TPC-DS 自动化基准测试工具
 
-一个轻量级、高度自动化的命令行工具，用于在 Google Cloud Dataproc 上运行 TPC-DS（1TB 规模）性能基准测试，只需一个配置文件即可完成所有操作。
+一个轻量级、高度自动化的命令行工具，用于在 Google Cloud Dataproc 上运行 TPC-DS 性能基准测试，只需一个配置文件即可完成所有操作。支持 1GB 到 100TB 的可配置规模因子（默认：1TB）。
+
+## 架构
+
+![架构图](arch.svg)
 
 ## 特性
 
