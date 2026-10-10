@@ -2,11 +2,13 @@
 
 import logging
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from google.cloud import bigquery
 from google.api_core.exceptions import NotFound, Conflict
+
+from lib.cluster_manager import configure_gcp_credentials
 
 logger = logging.getLogger(__name__)
 
@@ -125,6 +127,9 @@ class BQReporter:
         self.dataset_id = self.bq_config.get("dataset", "tpcds_metrics")
         self.table_id = self.bq_config.get("table", "benchmark_history")
 
+        # Configure GCP credentials if specified in conf.yaml
+        configure_gcp_credentials(self.gcp_config)
+
         # Initialize BigQuery client
         if self.enabled:
             self.client = bigquery.Client(project=self.project_id)
@@ -229,10 +234,14 @@ class BQReporter:
         except (ValueError, TypeError):
             executor_cores_int = 2
 
+        # Normalize Dataproc job state "DONE" to schema-standard "SUCCESS"
+        raw_status = query_result.get("status", "UNKNOWN")
+        normalized_status = "SUCCESS" if raw_status == "DONE" else raw_status
+
         row = {
             "job_uuid": str(uuid.uuid4()),
             "batch_id": query_result.get("batch_id", str(uuid.uuid4())),
-            "run_timestamp": datetime.utcnow().isoformat(),
+            "run_timestamp": datetime.now(timezone.utc).isoformat(),
             "project_id": self.project_id,
             "cluster_name": self.dataproc_config["cluster_name"],
             "scale_factor": self.benchmark_config["scale_factor"],
@@ -248,7 +257,7 @@ class BQReporter:
             ),
             "query_name": query_result.get("query_name", "unknown"),
             "iteration": query_result.get("iteration", 1),
-            "status": query_result.get("status", "UNKNOWN"),
+            "status": normalized_status,
             "duration_sec": query_result.get("duration_sec"),
             "compile_time_sec": query_result.get("compile_time_sec"),
             "input_bytes": query_result.get("input_bytes"),
@@ -358,7 +367,7 @@ SELECT
     worker_machine_type,
     scale_factor,
     COUNT(*) as total_queries,
-    COUNTIF(status = 'SUCCESS') as successful_queries,
+    COUNTIF(status IN ('SUCCESS', 'DONE')) as successful_queries,
     COUNTIF(status = 'FAILED') as failed_queries,
     AVG(duration_sec) as avg_duration_sec,
     MAX(duration_sec) as max_duration_sec,

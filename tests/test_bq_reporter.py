@@ -103,6 +103,15 @@ class TestBQReporter:
             assert row["query_name"] == "q1"
             assert row["worker_count"] == 4  # From config
 
+    def test_build_row_normalizes_done_status(self, sample_config, mock_query_result):
+        """Test that Dataproc DONE state is normalized to SUCCESS for BigQuery reporting."""
+        with patch("lib.bq_reporter.bigquery.Client"):
+            reporter = BQReporter(sample_config)
+            done_result = {**mock_query_result, "status": "DONE"}
+            row = reporter._build_row(done_result)
+
+            assert row["status"] == "SUCCESS"
+
     def test_report_result_disabled(self, sample_config, mock_query_result):
         """Test reporting when disabled."""
         sample_config["bigquery"]["enable"] = False
