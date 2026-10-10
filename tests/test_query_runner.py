@@ -46,6 +46,24 @@ class TestQueryRunner:
 
             assert queries == ["q1", "q2", "q3"]
 
+    def test_get_query_list_natural_sort_and_multipart(self, sample_config, tmp_path):
+        """Test natural sorting (q2 before q10) and multi-part query expansion (14 -> q14a, q14b)."""
+        for name in ["q10.sql", "q2.sql", "q1.sql", "q14b.sql", "q14a.sql"]:
+            (tmp_path / name).write_text("SELECT 1")
+
+        with patch("lib.query_runner.dataproc_v1.JobControllerClient"), \
+             patch("lib.query_runner.storage.Client"):
+            sample_config["benchmark"]["queries_to_run"] = "all"
+            runner = QueryRunner(sample_config)
+            runner.sql_dir = tmp_path
+
+            assert runner._get_query_list() == ["q1", "q2", "q10", "q14a", "q14b"]
+
+            sample_config["benchmark"]["queries_to_run"] = [2, 14]
+            runner_specific = QueryRunner(sample_config)
+            runner_specific.sql_dir = tmp_path
+            assert runner_specific._get_query_list() == ["q2", "q14a", "q14b"]
+
     def test_load_query_sql(self, sample_config, sql_dir):
         """Test loading SQL from file."""
         with patch("lib.query_runner.dataproc_v1.JobControllerClient"), \

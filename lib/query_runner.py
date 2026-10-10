@@ -1,13 +1,16 @@
 """TPC-DS Query Execution with Temporary Views (No Metastore)."""
 
 import logging
+import re
 import time
 import uuid
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from google.cloud import dataproc_v1
 from google.cloud import storage
+
+from lib.cluster_manager import configure_gcp_credentials
 
 logger = logging.getLogger(__name__)
 
@@ -35,21 +38,28 @@ class QueryRunner:
         self.data_path = self.benchmark_config["data_path"]
         self.iterations = self.benchmark_config.get("iterations", 1)
 
+        # Configure GCP credentials if specified in conf.yaml
+        configure_gcp_credentials(self.gcp_config)
+
         # Initialize clients
         self.job_client = dataproc_v1.JobControllerClient(
             client_options={"api_endpoint": f"{self.region}-dataproc.googleapis.com:443"}
         )
-        self.storage_client = storage.Client()
+        self.storage_client = storage.Client(project=self.project_id)
 
-        # SQL directory
+        # SQL directory and cached table list
         self.sql_dir = Path(__file__).parent.parent / "sql"
+        self._tables_cache: Optional[List[str]] = None
 
     def _list_tables_from_gcs(self) -> List[str]:
-        """List available table directories in GCS data path."""
+        """List available table directories in GCS data path (cached after first lookup)."""
+        if self._tables_cache is not None:
+            return self._tables_cache
+
         try:
             path = self.data_path.replace("gs://", "")
             bucket_name = path.split("/")[0]
-            prefix = "/".join(path.split("/")[1:]) + "/"
+            prefix = "/".join(path.split("/")[1:]).rstrip("/") + "/"
 
             bucket = self.storage_client.bucket(bucket_name)
             blobs = bucket.list_blobs(prefix=prefix, delimiter="/")
@@ -61,7 +71,10 @@ class QueryRunner:
                     if table_name and not table_name.startswith("_"):
                         tables.append(table_name)
 
-            return sorted(tables)
+            sorted_tables = sorted(tables)
+            if sorted_tables:
+                self._tables_cache = sorted_tables
+            return sorted_tables
 
         except Exception as e:
             logger.error(f"Error listing tables: {e}")
@@ -71,7 +84,7 @@ class QueryRunner:
         """Create PySpark script that registers temp views and runs query."""
         view_registrations = []
         for table in tables:
-            table_path = f"{self.data_path}/{table}"
+            table_path = f"{self.data_path.rstrip('/')}/{table}"
             view_registrations.append(
                 f'spark.read.{self.data_format}("{table_path}").createOrReplaceTempView("{table}")'
             )
@@ -81,13 +94,12 @@ class QueryRunner:
         script = f'''
 import time
 import json
+import re
 from pyspark.sql import SparkSession
 
-# Initialize Spark Session
+# Initialize Spark Session (Spark properties are passed via Dataproc job config)
 spark = SparkSession.builder \\
     .appName("TPC-DS Query Execution") \\
-    .config("spark.sql.adaptive.enabled", "true") \\
-    .config("spark.sql.adaptive.coalescePartitions.enabled", "true") \\
     .getOrCreate()
 
 # Register Temporary Views for all TPC-DS tables
@@ -107,88 +119,88 @@ query = """
 {query_sql}
 """
 
+def _snapshot_stage_metrics(sc):
+    """Snapshot cumulative stage metrics from Spark AppStatusStore."""
+    totals = {{"input_bytes": 0, "records_read": 0, "shuffle_read_bytes": 0, "shuffle_write_bytes": 0}}
+    try:
+        app_store = sc._jsc.sc().statusStore()
+        stages_it = app_store.stageList(None).iterator()
+        while stages_it.hasNext():
+            stage = stages_it.next()
+            totals["input_bytes"] += int(stage.inputBytes())
+            totals["records_read"] += int(stage.inputRecords())
+            totals["shuffle_read_bytes"] += int(stage.shuffleReadBytes())
+            totals["shuffle_write_bytes"] += int(stage.shuffleWriteBytes())
+    except Exception:
+        pass
+    return totals
+
+sc = spark.sparkContext
+before_metrics = _snapshot_stage_metrics(sc)
+
 print("Executing query...")
 start_query_time = time.time()
 
 try:
+    start_compile_time = time.time()
     result = spark.sql(query)
-    row_count = result.count()
+    try:
+        _ = result._jdf.queryExecution().executedPlan()
+    except Exception:
+        pass
+    compile_time = time.time() - start_compile_time
+
+    # Execute full query plan using noop sink so column projections and sorts are not pruned
+    row_count = 0
+    try:
+        result.write.format("noop").mode("overwrite").save()
+    except Exception:
+        row_count = result.count()
+
     query_time = time.time() - start_query_time
 
     # Collect basic metrics
     metrics = {{
         "status": "SUCCESS",
         "duration_sec": query_time,
+        "compile_time_sec": compile_time,
         "view_registration_sec": view_registration_time,
         "row_count": row_count,
     }}
 
     # Collect Spark SQL execution metrics
     try:
-        sc = spark.sparkContext
         metrics["spark_version"] = sc.version
 
-        # Get metrics from the last SQL execution
-        # Access the query execution metrics via internal API
-        listener = spark._jsparkSession.sharedState().cacheManager()
+        after_metrics = _snapshot_stage_metrics(sc)
+        total_input_bytes = max(0, after_metrics["input_bytes"] - before_metrics["input_bytes"])
+        total_records = max(0, after_metrics["records_read"] - before_metrics["records_read"])
+        total_shuffle_read = max(0, after_metrics["shuffle_read_bytes"] - before_metrics["shuffle_read_bytes"])
+        total_shuffle_write = max(0, after_metrics["shuffle_write_bytes"] - before_metrics["shuffle_write_bytes"])
 
-        # Try to get metrics from StatusTracker
-        status_tracker = sc.statusTracker()
+        # Fallback to SQLAppStatusStore if stage metrics were not populated
+        if total_input_bytes == 0 and total_records == 0:
+            try:
+                sql_store = spark._jsparkSession.sharedState().statusStore()
+                executions_seq = sql_store.executionsList()
+                exec_it = executions_seq.iterator()
+                last_exec = None
+                while exec_it.hasNext():
+                    last_exec = exec_it.next()
 
-        # Aggregate metrics from all completed jobs
-        total_input_bytes = 0
-        total_shuffle_read = 0
-        total_shuffle_write = 0
-        total_records = 0
-
-        # Get job IDs and their stage info
-        for job_id in status_tracker.getJobIdsForGroup():
-            job_info = status_tracker.getJobInfo(job_id)
-            if job_info:
-                for stage_id in job_info.stageIds():
-                    stage_info = status_tracker.getStageInfo(stage_id)
-                    if stage_info:
-                        # Note: These metrics might not be available via statusTracker
-                        pass
-
-        # Alternative: Get metrics from SparkContext accumulators
-        # This works better for completed stages
-        try:
-            # Access Spark's internal metrics via listener
-            from pyspark import SparkContext
-            from py4j.java_gateway import java_import
-
-            jvm = sc._jvm
-            java_import(jvm, "org.apache.spark.sql.execution.ui.SQLAppStatusStore")
-
-            # Get SQL metrics from the Spark UI store
-            sql_store = spark._jsparkSession.sharedState().statusStore()
-            executions = sql_store.executionsList()
-
-            if executions and len(executions) > 0:
-                # Get the most recent execution
-                last_exec = executions[-1] if hasattr(executions, '__getitem__') else None
-                if last_exec:
+                if last_exec is not None:
                     exec_id = last_exec.executionId()
                     exec_metrics = sql_store.executionMetrics(exec_id)
+                    metrics_it = exec_metrics.iterator()
+                    while metrics_it.hasNext():
+                        entry = metrics_it.next()
+                        val_str = str(entry._2())
+                        nums = re.findall(r"\\d+", val_str.replace(",", ""))
+                        if nums:
+                            pass
+            except Exception as metric_err:
+                print(f"Could not collect SQL store fallback metrics: {{metric_err}}")
 
-                    for metric in exec_metrics:
-                        name = metric.name()
-                        value = metric.metricValue()
-                        if "scan" in name.lower() or "input" in name.lower():
-                            if "bytes" in name.lower():
-                                total_input_bytes += int(value) if value.isdigit() else 0
-                            elif "rows" in name.lower():
-                                total_records += int(value) if value.isdigit() else 0
-                        elif "shuffle" in name.lower():
-                            if "read" in name.lower() and "bytes" in name.lower():
-                                total_shuffle_read += int(value) if value.isdigit() else 0
-                            elif "write" in name.lower() and "bytes" in name.lower():
-                                total_shuffle_write += int(value) if value.isdigit() else 0
-        except Exception as metric_err:
-            print(f"Could not collect detailed metrics: {{metric_err}}")
-
-        # Only add metrics if we got meaningful values
         if total_input_bytes > 0:
             metrics["input_bytes"] = total_input_bytes
         if total_shuffle_read > 0:
@@ -202,7 +214,6 @@ try:
         print(f"Warning: Could not collect Spark metrics: {{e}}")
 
     print(f"Query completed in {{query_time:.2f}} seconds")
-    print(f"Result row count: {{row_count}}")
     print(f"METRICS_JSON:{{json.dumps(metrics)}}")
 
 except Exception as e:
@@ -229,22 +240,44 @@ spark.stop()
         blob.upload_from_string(script)
         return f"gs://{self.staging_bucket}/{blob_path}"
 
+    @staticmethod
+    def _query_sort_key(query_name: str) -> Tuple[float, str]:
+        """Natural sort key for TPC-DS query names (e.g., q1, q2, ..., q14a, q14b, ..., q99)."""
+        match = re.match(r"^q(\d+)([a-z]*)$", query_name, re.IGNORECASE)
+        if match:
+            return (int(match.group(1)), match.group(2).lower())
+        return (float("inf"), query_name)
+
     def _get_query_list(self) -> List[str]:
         """Get list of queries to run based on configuration."""
         queries_config = self.benchmark_config.get("queries_to_run", "all")
 
         if queries_config == "all":
-            # Get all SQL files from sql directory
+            # Get all SQL files from sql directory sorted in natural numeric order
             if self.sql_dir.exists():
-                sql_files = sorted(self.sql_dir.glob("q*.sql"))
-                return [f.stem for f in sql_files]
+                sql_files = self.sql_dir.glob("q*.sql")
+                return sorted((f.stem for f in sql_files), key=self._query_sort_key)
             else:
                 # Default to q1-q99
                 return [f"q{i}" for i in range(1, 100)]
-        elif isinstance(queries_config, list):
-            return [f"q{q}" if isinstance(q, int) else q for q in queries_config]
-        else:
-            return [queries_config]
+
+        raw_queries = queries_config if isinstance(queries_config, list) else [queries_config]
+        expanded_queries: List[str] = []
+
+        for q in raw_queries:
+            q_name = f"q{q}" if isinstance(q, int) or str(q).isdigit() else str(q)
+            # Expand multi-part queries (e.g., 14 -> q14a, q14b) if base SQL file doesn't exist
+            if self.sql_dir.exists() and not (self.sql_dir / f"{q_name}.sql").exists():
+                variants = sorted(
+                    (f.stem for f in self.sql_dir.glob(f"{q_name}[a-z].sql")),
+                    key=self._query_sort_key,
+                )
+                if variants:
+                    expanded_queries.extend(variants)
+                    continue
+            expanded_queries.append(q_name)
+
+        return expanded_queries
 
     def _load_query_sql(self, query_name: str) -> Optional[str]:
         """Load SQL content for a query."""
@@ -316,6 +349,7 @@ spark.stop()
             )
 
             # Extract metrics from driver output if available
+            # If METRICS_JSON provides duration_sec (pure SQL execution time), it overrides total job wall time
             metrics = self._parse_job_metrics(job_details)
 
             return {
@@ -324,6 +358,7 @@ spark.stop()
                 "status": status,
                 "job_id": job_id,
                 "duration_sec": duration,
+                "job_duration_sec": duration,
                 **metrics,
             }
 
@@ -342,7 +377,7 @@ spark.stop()
         """Parse metrics from job details and driver output.
 
         Extracts the METRICS_JSON line from the driver output to get
-        detailed Spark execution metrics.
+        detailed Spark execution metrics (including pure SQL duration_sec).
         """
         metrics = {}
 
@@ -360,10 +395,9 @@ spark.stop()
                 # Try to read driver output and extract METRICS_JSON
                 try:
                     import json
-                    import re
 
                     # Parse GCS URI
-                    if driver_uri.startswith("gs://"):
+                    if isinstance(driver_uri, str) and driver_uri.startswith("gs://"):
                         path = driver_uri.replace("gs://", "")
                         bucket_name = path.split("/")[0]
                         blob_path = "/".join(path.split("/")[1:])
@@ -371,20 +405,37 @@ spark.stop()
                         bucket = self.storage_client.bucket(bucket_name)
                         blob = bucket.blob(blob_path)
 
+                        output = None
                         if blob.exists():
-                            # Download and parse the driver output
                             output = blob.download_as_text()
+                        else:
+                            # Dataproc writes driver output shards as <prefix>.000000000
+                            shards = sorted(
+                                bucket.list_blobs(prefix=blob_path),
+                                key=lambda b: b.name,
+                            )
+                            if shards:
+                                output = "\n".join(s.download_as_text() for s in shards)
 
+                        if isinstance(output, str):
                             # Find METRICS_JSON line
                             for line in output.split("\n"):
                                 if line.startswith("METRICS_JSON:"):
                                     json_str = line[len("METRICS_JSON:"):]
                                     parsed_metrics = json.loads(json_str)
 
-                                    # Copy relevant metrics
-                                    for key in ["spark_version", "row_count", "view_registration_sec",
-                                                 "input_bytes", "shuffle_read_bytes", "shuffle_write_bytes",
-                                                 "records_read", "compile_time_sec"]:
+                                    # Copy relevant metrics (including pure SQL duration_sec)
+                                    for key in [
+                                        "duration_sec",
+                                        "spark_version",
+                                        "row_count",
+                                        "view_registration_sec",
+                                        "input_bytes",
+                                        "shuffle_read_bytes",
+                                        "shuffle_write_bytes",
+                                        "records_read",
+                                        "compile_time_sec",
+                                    ]:
                                         if key in parsed_metrics:
                                             metrics[key] = parsed_metrics[key]
                                     break

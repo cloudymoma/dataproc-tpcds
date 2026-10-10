@@ -12,6 +12,8 @@ from typing import Any, Dict, Tuple
 from google.cloud import dataproc_v1
 from google.cloud import storage
 
+from lib.cluster_manager import configure_gcp_credentials
+
 logger = logging.getLogger(__name__)
 
 # All 24 TPC-DS tables
@@ -99,11 +101,14 @@ class DataGenerator:
         self.compression = self.benchmark_config.get("format_compression", "snappy")
         self.data_path = self.benchmark_config["data_path"]
 
+        # Configure GCP credentials if specified in conf.yaml
+        configure_gcp_credentials(self.gcp_config)
+
         # Initialize clients
         self.job_client = dataproc_v1.JobControllerClient(
             client_options={"api_endpoint": f"{self.region}-dataproc.googleapis.com:443"}
         )
-        self.storage_client = storage.Client()
+        self.storage_client = storage.Client(project=self.project_id)
 
     def check_data_exists(self) -> Tuple[bool, int]:
         """Check if TPC-DS data generation completed successfully.
@@ -434,13 +439,15 @@ class DataGenerator:
                     "--useDoubleForDecimal",
                     str(self.datagen_config.get("use_double_for_decimal", False)).lower(),
                 ],
-                # Performance tuning properties
+                # Performance tuning properties (merge user spark_properties with datagen overrides)
                 "properties": {
+                    **self.dataproc_config.get("spark_properties", {}),
                     # Parallelism settings
                     "spark.sql.shuffle.partitions": str(num_partitions),
                     "spark.default.parallelism": str(num_partitions),
-                    # Compression
+                    # Compression for both Parquet and ORC
                     "spark.sql.parquet.compression.codec": self.compression,
+                    "spark.sql.orc.compression.codec": self.compression,
                     # File size control
                     "spark.sql.files.maxRecordsPerFile": "1000000",
                     # Memory optimization
