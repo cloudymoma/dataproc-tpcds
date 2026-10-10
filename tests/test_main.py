@@ -145,13 +145,59 @@ class TestSetupCredentials:
 class TestMainIntegration:
     """Integration tests for main module."""
 
-    def test_dry_run_mode(self, sample_config, tmp_path):
-        """Test dry run mode doesn't execute benchmark."""
+    def test_dry_run_mode(self, sample_config, tmp_path, capsys):
+        """Test dry run mode validates config without touching GCS or running benchmark."""
         config_file = tmp_path / "conf.yaml"
         with open(config_file, "w") as f:
             yaml.dump(sample_config, f)
 
-        with patch("sys.argv", ["main.py", "--config", str(config_file), "--dry-run"]):
+        with patch("sys.argv", ["main.py", "--config", str(config_file), "--dry-run"]), \
+             patch("main.ensure_bucket_exists") as mock_ensure_bucket, \
+             patch("main.run_benchmark") as mock_run_benchmark:
             from main import main
-            # In dry run, should print config and return 0
-            # This would need actual execution to test properly
+
+            exit_code = main()
+            captured = capsys.readouterr()
+
+            assert exit_code == 0
+            assert "Configuration validated successfully" in captured.out
+            mock_ensure_bucket.assert_not_called()
+            mock_run_benchmark.assert_not_called()
+
+    def test_auto_delete_does_not_prompt(self, sample_config):
+        """Test --auto-delete deletes cluster automatically without interactive input()."""
+        from main import run_benchmark
+
+        with patch("main.ClusterManager") as mock_cm_cls, \
+             patch("main.DataGenerator") as mock_dg_cls, \
+             patch("main.QueryRunner") as mock_qr_cls, \
+             patch("main.BQReporter") as mock_bqr_cls, \
+             patch("builtins.input") as mock_input:
+            mock_cm = MagicMock()
+            mock_cm.create_cluster.return_value = MagicMock()
+            mock_cm.get_cluster_info.return_value = {"cluster_name": "test-cluster"}
+            mock_cm_cls.return_value = mock_cm
+
+            mock_dg = MagicMock()
+            mock_dg.check_data_exists.return_value = (True, 24)
+            mock_dg_cls.return_value = mock_dg
+
+            mock_qr = MagicMock()
+            mock_qr.run_all_queries.return_value = [
+                {"query_name": "q1", "status": "DONE", "duration_sec": 1.2}
+            ]
+            mock_qr_cls.return_value = mock_qr
+
+            mock_bqr = MagicMock()
+            mock_bqr.enabled = False
+            mock_bqr_cls.return_value = mock_bqr
+
+            exit_code = run_benchmark(
+                sample_config,
+                skip_cluster_delete=False,
+                auto_delete=True,
+            )
+
+            assert exit_code == 0
+            mock_input.assert_not_called()
+            mock_cm.delete_cluster.assert_called_once_with(wait=True)

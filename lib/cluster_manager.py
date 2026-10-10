@@ -1,6 +1,7 @@
 """Dataproc Cluster Lifecycle Management."""
 
 import logging
+import os
 import re
 from typing import Any, Dict, Optional
 
@@ -13,6 +14,15 @@ from google.api_core.operation import Operation
 from google.protobuf import duration_pb2
 
 logger = logging.getLogger(__name__)
+
+
+def configure_gcp_credentials(gcp_config: Dict[str, Any]) -> None:
+    """Configure GOOGLE_APPLICATION_CREDENTIALS from gcp config section if present."""
+    key_path = gcp_config.get("service_account_key_path")
+    if key_path:
+        expanded = os.path.expanduser(key_path)
+        if os.path.exists(expanded):
+            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = expanded
 
 
 def parse_duration_to_seconds(duration_str: str) -> int:
@@ -57,6 +67,9 @@ class ClusterManager:
         self.gcp_config = config["gcp"]
         self.dataproc_config = config["dataproc"]
         self.history_config = config.get("history_server", {})
+
+        # Ensure service account credentials (if configured) are applied before creating client
+        configure_gcp_credentials(self.gcp_config)
 
         self.project_id = self.gcp_config["project_id"]
         self.region = self.gcp_config["region"]
@@ -224,6 +237,13 @@ class ClusterManager:
             idle_delete_ttl=duration_pb2.Duration(seconds=max_idle_seconds),
         )
 
+        # Cluster tier (standard or premium / Lightning Engine)
+        tier_str = str(dp.get("tier", "standard")).lower()
+        if tier_str == "premium":
+            cluster_tier = ClusterConfig.ClusterTier.CLUSTER_TIER_PREMIUM
+        else:
+            cluster_tier = ClusterConfig.ClusterTier.CLUSTER_TIER_STANDARD
+
         # Build cluster config
         cluster_config = ClusterConfig(
             config_bucket=self.staging_bucket,
@@ -232,6 +252,7 @@ class ClusterManager:
             worker_config=worker_config,
             software_config=software_config,
             lifecycle_config=lifecycle_config,
+            cluster_tier=cluster_tier,
         )
 
         # Enable component gateway if specified

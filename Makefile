@@ -262,9 +262,11 @@ check-config: ## Verify configuration file exists and is valid
 
 check-auth: ## Check Google Cloud authentication
 	@echo "Checking Google Cloud authentication..."
-	@$(PYTHON) -c "from google.auth import default; \
+	@$(PYTHON) -c "import yaml; from lib.cluster_manager import configure_gcp_credentials; from google.auth import default; \
+		config = yaml.safe_load(open('$(CONFIG)')); \
+		configure_gcp_credentials(config.get('gcp', {})); \
 		credentials, project = default(); \
-		print('Authenticated. Project:', project)" 2>/dev/null || \
+		print('Authenticated. Project:', project or config.get('gcp', {}).get('project_id'))" 2>/dev/null || \
 		echo "$(YELLOW)Warning: Could not verify GCP authentication. Run 'gcloud auth application-default login'$(NC)"
 
 validate: check-config check-syntax ## Run all validation checks

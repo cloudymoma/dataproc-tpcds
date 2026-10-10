@@ -31,6 +31,27 @@ class TestClusterManager:
             assert cluster.project_id == "test-project"
             assert cluster.config.worker_config.num_instances == 4
 
+    def test_build_cluster_config_tier(self, sample_config):
+        """Test cluster tier configuration (standard vs premium)."""
+        from google.cloud import dataproc_v1
+
+        with patch("lib.cluster_manager.dataproc_v1.ClusterControllerClient"):
+            sample_config["dataproc"]["tier"] = "premium"
+            manager_premium = ClusterManager(sample_config)
+            cluster_premium = manager_premium._build_cluster_config()
+            assert (
+                cluster_premium.config.cluster_tier
+                == dataproc_v1.ClusterConfig.ClusterTier.CLUSTER_TIER_PREMIUM
+            )
+
+            sample_config["dataproc"]["tier"] = "standard"
+            manager_standard = ClusterManager(sample_config)
+            cluster_standard = manager_standard._build_cluster_config()
+            assert (
+                cluster_standard.config.cluster_tier
+                == dataproc_v1.ClusterConfig.ClusterTier.CLUSTER_TIER_STANDARD
+            )
+
     def test_cluster_exists_true(self, sample_config):
         """Test cluster_exists returns True when cluster exists."""
         with patch("lib.cluster_manager.dataproc_v1.ClusterControllerClient") as mock_client:

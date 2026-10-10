@@ -314,12 +314,17 @@ def prompt_delete_cluster() -> bool:
             print("Please enter 'y' or 'n'")
 
 
-def run_benchmark(config: Dict[str, Any], skip_cluster_delete: bool = False) -> int:
+def run_benchmark(
+    config: Dict[str, Any],
+    skip_cluster_delete: bool = False,
+    auto_delete: bool = False,
+) -> int:
     """Run the complete TPC-DS benchmark workflow.
 
     Args:
         config: Configuration dictionary
         skip_cluster_delete: If True, don't prompt for cluster deletion
+        auto_delete: If True, automatically delete the cluster without prompting
 
     Returns:
         Exit code (0 for success, non-zero for failure)
@@ -410,9 +415,9 @@ def run_benchmark(config: Dict[str, Any], skip_cluster_delete: bool = False) -> 
 
         query_results = query_runner.run_all_queries(batch_id=batch_id)
 
-        # Calculate summary
+        # Calculate summary (accept both DONE from Dataproc state and SUCCESS from driver metrics)
         total = len(query_results)
-        success = sum(1 for r in query_results if r.get("status") == "DONE")
+        success = sum(1 for r in query_results if r.get("status") in ("DONE", "SUCCESS"))
         failed = sum(1 for r in query_results if r.get("status") == "FAILED")
         skipped = sum(1 for r in query_results if r.get("status") == "SKIPPED")
 
@@ -461,7 +466,14 @@ def run_benchmark(config: Dict[str, Any], skip_cluster_delete: bool = False) -> 
     finally:
         # === Cleanup: Delete Cluster ===
         if cluster_created:
-            if skip_cluster_delete:
+            if auto_delete:
+                logger.info("Auto-deleting cluster (--auto-delete)...")
+                try:
+                    cluster_mgr.delete_cluster(wait=True)
+                    logger.info("Cluster deleted")
+                except Exception as e:
+                    logger.warning(f"Error during auto-delete cleanup: {e}")
+            elif skip_cluster_delete:
                 logger.info("Skipping cluster deletion (--skip-cluster-delete)")
             else:
                 try:
@@ -538,23 +550,22 @@ For more information, see README.md
         # Setup credentials
         setup_credentials(config)
 
+        # Dry run mode (validate and display plan without side effects on GCS)
+        if args.dry_run:
+            print_dry_run_summary(config)
+            return 0
+
         # Ensure GCS bucket exists (creates in same region as cluster if needed)
         if not ensure_bucket_exists(config):
             logger.error("Failed to ensure GCS bucket exists. Please check permissions.")
             return 1
 
-        # Dry run mode
-        if args.dry_run:
-            print_dry_run_summary(config)
-            return 0
-
         # Run benchmark
-        exit_code = run_benchmark(config, skip_cluster_delete=args.skip_cluster_delete)
-
-        # Auto-delete cluster if requested
-        if args.auto_delete and exit_code == 0:
-            cluster_mgr = ClusterManager(config)
-            cluster_mgr.delete_cluster(wait=True)
+        exit_code = run_benchmark(
+            config,
+            skip_cluster_delete=args.skip_cluster_delete,
+            auto_delete=args.auto_delete,
+        )
 
         return exit_code
 
