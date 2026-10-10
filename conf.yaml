@@ -70,14 +70,14 @@ dataproc:
     # Executor count
     "spark.dynamicAllocation.enabled": "false"
     "spark.executor.instances": "8"
-    # Executor sizing (maximized for n2-standard-8)
+    # Executor sizing (2 executors per n2-standard-8 worker: 2 × 11GB = 22GB <= ~25.6GB YARN limit)
     "spark.executor.cores": "4"
-    "spark.executor.memory": "14g"
+    "spark.executor.memory": "10g"
     "spark.executor.memoryOverhead": "1g"
     # Driver settings (runs on master node in client mode: n2-standard-8)
-    "spark.driver.cores": "6"
-    "spark.driver.memory": "24g"
-    "spark.driver.memoryOverhead": "4g"
+    "spark.driver.cores": "4"
+    "spark.driver.memory": "12g"
+    "spark.driver.memoryOverhead": "2g"
     # Serialization
     "spark.serializer": "org.apache.spark.serializer.KryoSerializer"
     # Adaptive Query Execution (AQE)

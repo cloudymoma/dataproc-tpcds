@@ -13,9 +13,9 @@ setup(
     description="GCP Dataproc TPC-DS Auto-Benchmark Tool",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    author="Your Name",
-    author_email="your.email@example.com",
-    url="https://github.com/your-org/dataproc-tpcds-bench",
+    author="Bin Wu",
+    author_email="binwu@google.com",
+    url="https://github.com/cloudymoma/dataproc-tpcds",
     packages=find_packages(exclude=["tests", "tests.*"]),
     python_requires=">=3.8",
     install_requires=[

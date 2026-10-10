@@ -495,7 +495,7 @@ python main.py [OPTIONS]
 | `worker_machine_type` | STRING | Worker 机器类型 |
 | `query_name` | STRING | 查询名称（如 "q1"） |
 | `iteration` | INTEGER | 迭代次数 |
-| `status` | STRING | DONE、FAILED 或 SKIPPED |
+| `status` | STRING | SUCCESS、FAILED 或 SKIPPED |
 | `duration_sec` | FLOAT | 总执行时间（秒） |
 | `input_bytes` | INT64 | 扫描的总数据量（如可用） |
 | `shuffle_read_bytes` | INT64 | Shuffle 读取字节数（如可用） |
@@ -614,23 +614,23 @@ dataproc:
 **Executor 和 Driver 设置：**
 ```yaml
 spark_properties:
-  # Executors（共 8 个，每个 worker 2 个）
+  # Executors（共 8 个，每个 worker 2 个：2 × 11GB = 22GB <= ~25.6GB YARN 内存限制）
   "spark.executor.instances": "8"
   "spark.executor.cores": "4"
-  "spark.executor.memory": "14g"
+  "spark.executor.memory": "10g"
   "spark.executor.memoryOverhead": "1g"
   # Driver（在 master 节点上以 client 模式运行）
-  "spark.driver.cores": "6"
-  "spark.driver.memory": "24g"
-  "spark.driver.memoryOverhead": "4g"
+  "spark.driver.cores": "4"
+  "spark.driver.memory": "12g"
+  "spark.driver.memoryOverhead": "2g"
 ```
 
 **默认资源分配（1 个 master + 4 个 worker，全部为 n2-standard-8）：**
 
 | 组件 | 位置 | 核心数 | 内存 |
 |------|------|--------|------|
-| 1 个 Driver | Master 节点 | 6 | 28GB |
-| 8 个 Executor | Workers 1-4（每个 2 个） | 32 | 120GB |
+| 1 个 Driver | Master 节点 | 4 | 14GB |
+| 8 个 Executor | Workers 1-4（每个 2 个） | 32 | 88GB |
 
 **关键原则：**
 - **Driver**：运行在 master 节点（通过 Python API 以 client 模式运行）

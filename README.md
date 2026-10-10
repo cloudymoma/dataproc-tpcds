@@ -495,7 +495,7 @@ The `benchmark_history` table includes:
 | `worker_machine_type` | STRING | Worker machine type |
 | `query_name` | STRING | Query name (e.g., "q1") |
 | `iteration` | INTEGER | Iteration number |
-| `status` | STRING | DONE, FAILED, or SKIPPED |
+| `status` | STRING | SUCCESS, FAILED, or SKIPPED |
 | `duration_sec` | FLOAT | Total execution time in seconds |
 | `input_bytes` | INT64 | Total input data scanned (when available) |
 | `shuffle_read_bytes` | INT64 | Shuffle read bytes (when available) |
@@ -614,23 +614,23 @@ dataproc:
 **Executor and Driver settings:**
 ```yaml
 spark_properties:
-  # Executors (8 total, 2 per worker)
+  # Executors (8 total, 2 per worker: 2 × 11GB = 22GB <= ~25.6GB YARN limit)
   "spark.executor.instances": "8"
   "spark.executor.cores": "4"
-  "spark.executor.memory": "14g"
+  "spark.executor.memory": "10g"
   "spark.executor.memoryOverhead": "1g"
   # Driver (runs on master node in client mode)
-  "spark.driver.cores": "6"
-  "spark.driver.memory": "24g"
-  "spark.driver.memoryOverhead": "4g"
+  "spark.driver.cores": "4"
+  "spark.driver.memory": "12g"
+  "spark.driver.memoryOverhead": "2g"
 ```
 
 **Default resource allocation (1 master + 4 workers, all n2-standard-8):**
 
 | Component | Location | Cores | Memory |
 |-----------|----------|-------|--------|
-| 1 Driver | Master node | 6 | 28GB |
-| 8 Executors | Workers 1-4 (2 each) | 32 | 120GB |
+| 1 Driver | Master node | 4 | 14GB |
+| 8 Executors | Workers 1-4 (2 each) | 32 | 88GB |
 
 **Key principles:**
 - **Driver**: Runs on master node (client mode via Python API)
